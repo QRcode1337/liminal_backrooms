@@ -28,7 +28,8 @@ from shared_utils import (
     call_replicate_api,
     call_deepseek_api,
     open_html_in_browser,
-    generate_image_from_text
+    generate_image_from_text,
+    generate_video_with_sora
 )
 from gui import LiminalBackroomsApp
 
@@ -297,6 +298,51 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     print(f"--- Prompt to {model} ({ai_name}) ---")
     
     try:
+        # Route Sora video models
+        if model_id in ("sora-2", "sora-2-pro"):
+            print(f"Using Sora Video API for model: {model_id}")
+            # Use last user message as the video prompt
+            prompt_content = ""
+            if len(messages) > 0:
+                prompt_content = messages[-1].get("content", "")
+            if not isinstance(prompt_content, str) or len(prompt_content.strip()) == 0:
+                prompt_content = "A short abstract motion graphic in warm colors"
+
+            # Optional duration/size via env
+            sora_seconds_env = os.getenv("SORA_SECONDS", "")
+            sora_size = os.getenv("SORA_SIZE", "") or None
+            try:
+                sora_seconds = int(sora_seconds_env) if sora_seconds_env else None
+            except ValueError:
+                sora_seconds = None
+
+            print(f"[Sora] Starting job with seconds={sora_seconds} size={sora_size}")
+            video_result = generate_video_with_sora(
+                prompt=prompt_content,
+                model=model_id,
+                seconds=sora_seconds,
+                size=sora_size,
+            )
+
+            if video_result.get("success"):
+                print(f"[Sora] Completed: id={video_result.get('video_id')} path={video_result.get('video_path')}")
+                # Return a lightweight textual confirmation; video is saved to disk
+                return {
+                    "role": "assistant",
+                    "content": f"[Sora] Video created: {video_result.get('video_path')}",
+                    "model": model,
+                    "ai_name": ai_name
+                }
+            else:
+                err = video_result.get("error", "unknown error")
+                print(f"[Sora] Failed: {err}")
+                return {
+                    "role": "system",
+                    "content": f"[Sora] Video generation failed: {err}",
+                    "model": model,
+                    "ai_name": ai_name
+                }
+
         # Try Claude models first via Anthropic API
         if "claude" in model_id.lower() or model_id in ["anthropic/claude-3-opus-20240229", "anthropic/claude-3-sonnet-20240229", "anthropic/claude-3-haiku-20240307"]:
             print(f"Using Claude API for model: {model_id}")
@@ -845,6 +891,45 @@ class ConversationManager:
                 self.app.left_pane.append_text(f"\n{ai_name} ({result.get('model', '')}):\n\nGenerating an image based on the prompt...\n")
                 if hasattr(self.app.left_pane, 'display_image'):
                     self.app.left_pane.display_image(result['image_url'])
+
+        # Optionally trigger Sora video generation from AI-1 responses (no GUI embedding)
+        try:
+            auto_sora = os.getenv("SORA_AUTO_FROM_AI1", "0").strip() == "1"
+            if auto_sora and ai_name == "AI-1" and isinstance(result, dict):
+                prompt_text = result.get("content", "")
+                # Require a minimally substantive prompt
+                if isinstance(prompt_text, str) and len(prompt_text.strip()) > 20:
+                    # Inform user in the UI synchronously (short message)
+                    self.app.left_pane.append_text("\n[system] Starting Sora video job from AI-1 response...\n", "system")
+
+                    # Read optional overrides from environment
+                    sora_model = os.getenv("SORA_MODEL", "sora-2")
+                    sora_seconds_env = os.getenv("SORA_SECONDS", "")
+                    sora_size = os.getenv("SORA_SIZE", "") or None
+                    try:
+                        sora_seconds = int(sora_seconds_env) if sora_seconds_env else None
+                    except ValueError:
+                        sora_seconds = None
+
+                    # Run in background to avoid blocking UI
+                    import threading
+                    def _run_sora_job(prompt_capture: str):
+                        result_dict = generate_video_with_sora(
+                            prompt=prompt_capture,
+                            model=sora_model,
+                            seconds=sora_seconds,
+                            size=sora_size,
+                            poll_interval_seconds=5.0,
+                        )
+                        # Log to console; UI updates from background threads are avoided
+                        if result_dict.get("success"):
+                            print(f"Sora video completed: {result_dict.get('video_path')}")
+                        else:
+                            print(f"Sora video failed: {result_dict.get('error')}")
+
+                    threading.Thread(target=_run_sora_job, args=(prompt_text,), daemon=True).start()
+        except Exception as e:
+            print(f"Auto Sora trigger error: {e}")
         
         # Update the conversation display
         visible_conversation = [msg for msg in conversation if not msg.get('hidden', False)]

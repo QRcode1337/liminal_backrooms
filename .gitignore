@@ -171,3 +171,4 @@ memory/ai-2/*
 *.bkp
 logs/*
 !logs/.gitkeep
+videos/*

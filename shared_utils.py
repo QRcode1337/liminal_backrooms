@@ -650,3 +650,113 @@ def generate_image_from_text(text, model="gpt-image-1"):
             "error": str(e)
         }
 
+# -------------------- Sora Video Utilities --------------------
+def ensure_videos_dir() -> Path:
+    """Create a 'videos' directory in the project root if it doesn't exist."""
+    videos_dir = Path("videos")
+    videos_dir.mkdir(exist_ok=True)
+    return videos_dir
+
+def generate_video_with_sora(
+    prompt: str,
+    model: str = "sora-2",
+    seconds: int | None = None,
+    size: str | None = None,
+    poll_interval_seconds: float = 5.0,
+) -> dict:
+    """
+    Create a Sora video via REST API, poll until completion, and save MP4 to videos/.
+
+    Returns a dict with keys: success, video_id, status, video_path (when completed), error
+    """
+    try:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return {"success": False, "error": "OPENAI_API_KEY not set"}
+
+        base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        verbose = os.getenv('SORA_VERBOSE', '1').strip() == '1'
+        def vlog(msg: str):
+            if verbose:
+                print(msg)
+        headers_json = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        # Start render job
+        payload = {"model": model, "prompt": prompt}
+        if seconds is not None:
+            payload["seconds"] = str(seconds)
+        if size is not None:
+            payload["size"] = size
+
+        create_url = f"{base_url}/videos"
+        vlog(f"[Sora] Create: url={create_url} model={model} seconds={seconds} size={size}")
+        vlog(f"[Sora] Prompt (truncated): {prompt[:200]}{'...' if len(prompt) > 200 else ''}")
+        resp = requests.post(create_url, headers=headers_json, json=payload, timeout=60)
+        if not resp.ok:
+            err_text = resp.text
+            try:
+                err_json = resp.json()
+                vlog(f"[Sora] Create error JSON: {err_json}")
+            except Exception:
+                vlog(f"[Sora] Create error TEXT: {err_text}")
+            return {"success": False, "error": f"Create failed {resp.status_code}: {err_text}"}
+        job = resp.json()
+        video_id = job.get('id')
+        status = job.get('status')
+        vlog(f"[Sora] Job started: id={video_id} status={status}")
+        if not video_id:
+            return {"success": False, "error": "No video id returned from create()"}
+
+        # Poll until completion/failed
+        retrieve_url = f"{base_url}/videos/{video_id}"
+        last_status = status
+        last_progress = None
+        while status in ("queued", "in_progress"):
+            time.sleep(poll_interval_seconds)
+            r = requests.get(retrieve_url, headers=headers_json, timeout=60)
+            if not r.ok:
+                vlog(f"[Sora] Retrieve failed: code={r.status_code} body={r.text}")
+                return {"success": False, "video_id": video_id, "error": f"Retrieve failed {r.status_code}: {r.text}"}
+            job = r.json()
+            status = job.get('status')
+            progress = job.get('progress')
+            if status != last_status or progress != last_progress:
+                vlog(f"[Sora] Status update: status={status} progress={progress}")
+                last_status = status
+                last_progress = progress
+
+        if status != "completed":
+            vlog(f"[Sora] Final non-completed status: {status} job={job}")
+            return {"success": False, "video_id": video_id, "status": status, "error": f"Final status: {status}"}
+
+        # Download the MP4
+        content_url = f"{base_url}/videos/{video_id}/content"
+        vlog(f"[Sora] Download: url={content_url}")
+        rc = requests.get(content_url, headers={'Authorization': f'Bearer {api_key}'}, stream=True, timeout=300)
+        if not rc.ok:
+            vlog(f"[Sora] Download failed: code={rc.status_code} body={rc.text}")
+            return {"success": False, "video_id": video_id, "status": status, "error": f"Download failed {rc.status_code}: {rc.text}"}
+
+        videos_dir = ensure_videos_dir()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_snippet = re.sub(r"[^a-zA-Z0-9_-]", "_", prompt[:40]) or "video"
+        out_path = videos_dir / f"{timestamp}_{safe_snippet}.mp4"
+        with open(out_path, "wb") as f:
+            for chunk in rc.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        vlog(f"[Sora] Saved video: {out_path}")
+        return {
+            "success": True,
+            "video_id": video_id,
+            "status": status,
+            "video_path": str(out_path)
+        }
+    except Exception as e:
+        logging.exception("Sora video generation error")
+        return {"success": False, "error": str(e)}
+
