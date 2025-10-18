@@ -30,9 +30,19 @@ Huge thanks to Andy Ayrey and Janus for their endless inspiration.
   - Customizable conversation turns and modes (AI-AI or Human-AI)
   - Preset system prompt pairs
   - Image generation and analysis capabilities
-  - Export functionality for conversations and generated images
-  - Modern dark-themed GUI interface
+  - Export functionality for conversations and generated images (HTML, Markdown, JSON)
+  - Modern dark-themed GUI interface with light theme toggle
   - Conversation memory system
+  - Auto-save functionality (every 5 minutes)
+  - Comprehensive keyboard shortcuts
+  - Search functionality within conversations
+  - Bookmark important conversation nodes
+  - Undo/Redo support for conversation actions
+  - Drag-and-drop image upload
+  - Real-time session statistics (turns, messages, branches, elapsed time)
+  - Network graph zoom and pan controls
+  - Audio notifications for turn completion
+  - Professional menu bar with organized features
 
 ## Prerequisites
 
@@ -115,7 +125,9 @@ poetry run python main.py
    - AI Model Selection: Choose models for AI-1 and AI-2
    - Prompt Style: Select from predefined conversation styles
    - Input Field: Enter your message or initial prompt
-   - Export: Save conversation and generated images
+   - Export: Save conversation and generated images in multiple formats
+   - Statistics Panel: View real-time session metrics (turns, messages, branches, time)
+   - Menu Bar: Access all features through organized menus (File, Edit, View, Navigation, Help)
 
 3. Branching Features:
    - Right-click on any text to access branching options:
@@ -130,7 +142,37 @@ poetry run python main.py
 4. Special Features:
    - Chain of Thought: DeepSeek models show reasoning process
    - Image Generation: OpenAI Images (gpt-image-1) creates images from prompts
-   - Export: Saves conversations and images with timestamps
+   - Drag & Drop: Drop image files directly onto the conversation window
+   - Export: Saves conversations in HTML, Markdown, or JSON formats with timestamps
+   - Search: Find text within conversations (Ctrl+F)
+   - Bookmarks: Mark and quickly navigate to important conversation nodes (Ctrl+B)
+   - Auto-save: Conversations automatically saved every 5 minutes to exports/autosave/
+   - Theme Toggle: Switch between dark and light themes (Ctrl+T)
+   - Zoom Controls: Zoom in/out on network graph (Ctrl++/Ctrl+-)
+   - Undo/Redo: Reverse conversation actions (Ctrl+Z/Ctrl+Y)
+
+5. Keyboard Shortcuts:
+   **File Operations:**
+   - Ctrl+S: Save conversation
+   - Ctrl+E: Export conversation
+   - Ctrl+L: Clear conversation
+   - Ctrl+Q: Exit application
+
+   **Edit Operations:**
+   - Ctrl+Z: Undo
+   - Ctrl+Y: Redo
+   - Ctrl+F: Search in conversation
+   - Ctrl+C: Copy selected text
+
+   **View Operations:**
+   - Ctrl++: Zoom in network graph
+   - Ctrl+-: Zoom out network graph
+   - Ctrl+0: Reset zoom
+   - Ctrl+T: Toggle dark/light theme
+
+   **Navigation:**
+   - Ctrl+B: Bookmark current node
+   - Ctrl+Shift+B: Show bookmarks
 
 ## Troubleshooting
 

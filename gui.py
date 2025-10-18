@@ -93,11 +93,14 @@ class NetworkGraphWidget(QWidget):
         # Edge animation data
         self.growing_edges = {}  # Dictionary to track growing edges: {(source, target): growth_progress}
         self.edge_growth_speed = 0.05  # Increased speed of edge growth animation (was 0.02)
-        
+
         # Visual settings
         self.margin = 50
         self.selected_node = None
         self.hovered_node = None
+        self.zoom_factor = 1.0  # Zoom level (1.0 = 100%)
+        self.pan_offset_x = 0  # Pan offset in X direction
+        self.pan_offset_y = 0  # Pan offset in Y direction
         self.animation_progress = 0
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_animation)
@@ -1050,6 +1053,41 @@ class ControlPanel(QWidget):
         
         right_column.addWidget(action_container)
         
+        # Statistics panel
+        stats_container = QWidget()
+        stats_layout = QVBoxLayout(stats_container)
+        stats_layout.setContentsMargins(10, 10, 10, 10)
+        stats_layout.setSpacing(5)
+        stats_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+            }}
+        """)
+
+        stats_title = QLabel("Session Statistics")
+        stats_title.setStyleSheet(f"color: {COLORS['text_bright']}; font-weight: bold; font-size: 12px;")
+        stats_layout.addWidget(stats_title)
+
+        self.stats_turns = QLabel("Turns: 0")
+        self.stats_turns.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 11px;")
+        stats_layout.addWidget(self.stats_turns)
+
+        self.stats_messages = QLabel("Messages: 0")
+        self.stats_messages.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 11px;")
+        stats_layout.addWidget(self.stats_messages)
+
+        self.stats_branches = QLabel("Branches: 0")
+        self.stats_branches.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 11px;")
+        stats_layout.addWidget(self.stats_branches)
+
+        self.stats_time = QLabel("Elapsed: 0:00:00")
+        self.stats_time.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 11px;")
+        stats_layout.addWidget(self.stats_time)
+
+        right_column.addWidget(stats_container)
+
         # Add columns to the controls layout
         controls_layout.addLayout(left_column, 1)
         controls_layout.addLayout(middle_column, 1)
@@ -1243,6 +1281,11 @@ class ConversationPane(QWidget):
         self.conversation_display.setReadOnly(True)
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Enable drag and drop for images
+        self.conversation_display.setAcceptDrops(True)
+        self.conversation_display.dragEnterEvent = self.drag_enter_event
+        self.conversation_display.dropEvent = self.drop_event
         
         # Set font for conversation display
         font = QFont("Segoe UI", 10)
@@ -1639,6 +1682,33 @@ class ConversationPane(QWidget):
         dots = "." * self.loading_dots
         self.submit_button.setText(f"Processing{dots}")
     
+    def drag_enter_event(self, event):
+        """Handle drag enter event for file uploads"""
+        if event.mimeData().hasUrls():
+            # Check if any of the URLs are image files
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def drop_event(self, event):
+        """Handle drop event for file uploads"""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+                    # Display the dropped image
+                    self.display_image(file_path)
+                    # Add to images list
+                    self.image_paths.append(file_path)
+                    # Show success message
+                    main_window = self.window()
+                    if hasattr(main_window, 'statusBar'):
+                        main_window.statusBar().showMessage(f"Image added: {os.path.basename(file_path)}", 3000)
+            event.acceptProposedAction()
+
     def show_context_menu(self, position):
         """Show context menu at the given position"""
         # Get selected text
@@ -1842,7 +1912,7 @@ class LiminalBackroomsApp(QMainWindow):
     """Main application window"""
     def __init__(self):
         super().__init__()
-        
+
         # Main app state
         self.conversation = []
         self.turn_count = 0
@@ -1850,27 +1920,45 @@ class LiminalBackroomsApp(QMainWindow):
         self.image_paths = []
         self.branch_conversations = {}  # Store branch conversations by ID
         self.active_branch = None      # Currently displayed branch
-        
+
+        # Statistics
+        self.session_start_time = time.time()
+        self.total_turns = 0
+        self.total_messages = 0
+
         # Set up the UI
         self.setup_ui()
-        
+
         # Connect signals and slots
         self.connect_signals()
-        
+
         # Dark theme
         self.apply_dark_theme()
-        
+
         # Restore splitter state if available
         self.restore_splitter_state()
-        
+
         # Start maximized
         self.showMaximized()
+
+        # Start statistics update timer
+        self.stats_timer = QTimer(self)
+        self.stats_timer.timeout.connect(self.update_statistics)
+        self.stats_timer.start(1000)  # Update every second
+
+        # Start auto-save timer (every 5 minutes)
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.timeout.connect(self.auto_save)
+        self.autosave_timer.start(300000)  # 5 minutes in milliseconds
     
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("Liminal Backrooms v0.7")
+        self.setWindowTitle("Liminal Backrooms v0.8")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
+
+        # Set up keyboard shortcuts
+        self.setup_shortcuts()
         
         # Create central widget
         central_widget = QWidget()
@@ -1926,22 +2014,236 @@ class LiminalBackroomsApp(QMainWindow):
         # Set up input callback
         self.left_pane.set_input_callback(self.handle_user_input)
     
+    def setup_shortcuts(self):
+        """Set up keyboard shortcuts"""
+        # Save conversation
+        save_shortcut = QAction("Save", self)
+        save_shortcut.setShortcut(QKeySequence("Ctrl+S"))
+        save_shortcut.triggered.connect(self.save_conversation)
+        self.addAction(save_shortcut)
+
+        # Export conversation
+        export_shortcut = QAction("Export", self)
+        export_shortcut.setShortcut(QKeySequence("Ctrl+E"))
+        export_shortcut.triggered.connect(self.export_conversation)
+        self.addAction(export_shortcut)
+
+        # Find/Search
+        search_shortcut = QAction("Search", self)
+        search_shortcut.setShortcut(QKeySequence("Ctrl+F"))
+        search_shortcut.triggered.connect(self.show_search_dialog)
+        self.addAction(search_shortcut)
+
+        # Copy selected text
+        copy_shortcut = QAction("Copy", self)
+        copy_shortcut.setShortcut(QKeySequence("Ctrl+C"))
+        copy_shortcut.triggered.connect(self.copy_selected_text)
+        self.addAction(copy_shortcut)
+
+        # Clear conversation
+        clear_shortcut = QAction("Clear", self)
+        clear_shortcut.setShortcut(QKeySequence("Ctrl+L"))
+        clear_shortcut.triggered.connect(self.clear_conversation)
+        self.addAction(clear_shortcut)
+
+        # Zoom in network graph
+        zoom_in_shortcut = QAction("Zoom In", self)
+        zoom_in_shortcut.setShortcut(QKeySequence("Ctrl++"))
+        zoom_in_shortcut.triggered.connect(self.zoom_in_graph)
+        self.addAction(zoom_in_shortcut)
+
+        # Zoom out network graph
+        zoom_out_shortcut = QAction("Zoom Out", self)
+        zoom_out_shortcut.setShortcut(QKeySequence("Ctrl+-"))
+        zoom_out_shortcut.triggered.connect(self.zoom_out_graph)
+        self.addAction(zoom_out_shortcut)
+
+        # Reset zoom
+        zoom_reset_shortcut = QAction("Reset Zoom", self)
+        zoom_reset_shortcut.setShortcut(QKeySequence("Ctrl+0"))
+        zoom_reset_shortcut.triggered.connect(self.reset_zoom_graph)
+        self.addAction(zoom_reset_shortcut)
+
+        # Toggle theme
+        theme_shortcut = QAction("Toggle Theme", self)
+        theme_shortcut.setShortcut(QKeySequence("Ctrl+T"))
+        theme_shortcut.triggered.connect(self.toggle_theme)
+        self.addAction(theme_shortcut)
+
+        # Undo
+        undo_shortcut = QAction("Undo", self)
+        undo_shortcut.setShortcut(QKeySequence("Ctrl+Z"))
+        undo_shortcut.triggered.connect(self.undo_action)
+        self.addAction(undo_shortcut)
+
+        # Redo
+        redo_shortcut = QAction("Redo", self)
+        redo_shortcut.setShortcut(QKeySequence("Ctrl+Y"))
+        redo_shortcut.triggered.connect(self.redo_action)
+        self.addAction(redo_shortcut)
+
+        # Bookmark current node
+        bookmark_shortcut = QAction("Bookmark", self)
+        bookmark_shortcut.setShortcut(QKeySequence("Ctrl+B"))
+        bookmark_shortcut.triggered.connect(self.bookmark_current_node)
+        self.addAction(bookmark_shortcut)
+
+        # Show bookmarks
+        show_bookmarks_shortcut = QAction("Show Bookmarks", self)
+        show_bookmarks_shortcut.setShortcut(QKeySequence("Ctrl+Shift+B"))
+        show_bookmarks_shortcut.triggered.connect(self.show_bookmarks)
+        self.addAction(show_bookmarks_shortcut)
+
+        # Create menu bar
+        self.create_menu_bar()
+
+    def create_menu_bar(self):
+        """Create the application menu bar"""
+        menubar = self.menuBar()
+        menubar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+                border-bottom: 1px solid {COLORS['border']};
+                padding: 2px;
+            }}
+            QMenuBar::item {{
+                padding: 5px 10px;
+                background-color: transparent;
+            }}
+            QMenuBar::item:selected {{
+                background-color: {COLORS['accent_blue']};
+            }}
+            QMenu {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+            }}
+            QMenu::item {{
+                padding: 5px 25px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['accent_blue']};
+            }}
+        """)
+
+        # File menu
+        file_menu = menubar.addMenu("File")
+
+        save_action = QAction("Save Conversation", self)
+        save_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_action.triggered.connect(self.save_conversation)
+        file_menu.addAction(save_action)
+
+        export_action = QAction("Export Conversation", self)
+        export_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_action.triggered.connect(self.export_conversation)
+        file_menu.addAction(export_action)
+
+        file_menu.addSeparator()
+
+        clear_action = QAction("Clear Conversation", self)
+        clear_action.setShortcut(QKeySequence("Ctrl+L"))
+        clear_action.triggered.connect(self.clear_conversation)
+        file_menu.addAction(clear_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Edit menu
+        edit_menu = menubar.addMenu("Edit")
+
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        undo_action.triggered.connect(self.undo_action)
+        edit_menu.addAction(undo_action)
+
+        redo_action = QAction("Redo", self)
+        redo_action.setShortcut(QKeySequence("Ctrl+Y"))
+        redo_action.triggered.connect(self.redo_action)
+        edit_menu.addAction(redo_action)
+
+        edit_menu.addSeparator()
+
+        search_action = QAction("Search", self)
+        search_action.setShortcut(QKeySequence("Ctrl+F"))
+        search_action.triggered.connect(self.show_search_dialog)
+        edit_menu.addAction(search_action)
+
+        copy_action = QAction("Copy Selected", self)
+        copy_action.setShortcut(QKeySequence("Ctrl+C"))
+        copy_action.triggered.connect(self.copy_selected_text)
+        edit_menu.addAction(copy_action)
+
+        # View menu
+        view_menu = menubar.addMenu("View")
+
+        zoom_in_action = QAction("Zoom In", self)
+        zoom_in_action.setShortcut(QKeySequence("Ctrl++"))
+        zoom_in_action.triggered.connect(self.zoom_in_graph)
+        view_menu.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("Zoom Out", self)
+        zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
+        zoom_out_action.triggered.connect(self.zoom_out_graph)
+        view_menu.addAction(zoom_out_action)
+
+        zoom_reset_action = QAction("Reset Zoom", self)
+        zoom_reset_action.setShortcut(QKeySequence("Ctrl+0"))
+        zoom_reset_action.triggered.connect(self.reset_zoom_graph)
+        view_menu.addAction(zoom_reset_action)
+
+        view_menu.addSeparator()
+
+        theme_action = QAction("Toggle Theme", self)
+        theme_action.setShortcut(QKeySequence("Ctrl+T"))
+        theme_action.triggered.connect(self.toggle_theme)
+        view_menu.addAction(theme_action)
+
+        # Navigation menu
+        nav_menu = menubar.addMenu("Navigation")
+
+        bookmark_action = QAction("Bookmark Node", self)
+        bookmark_action.setShortcut(QKeySequence("Ctrl+B"))
+        bookmark_action.triggered.connect(self.bookmark_current_node)
+        nav_menu.addAction(bookmark_action)
+
+        show_bookmarks_action = QAction("Show Bookmarks", self)
+        show_bookmarks_action.setShortcut(QKeySequence("Ctrl+Shift+B"))
+        show_bookmarks_action.triggered.connect(self.show_bookmarks)
+        nav_menu.addAction(show_bookmarks_action)
+
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self.show_shortcuts_help)
+        help_menu.addAction(shortcuts_action)
+
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
     def connect_signals(self):
         """Connect all signals and slots"""
         # Node selection in network view
         self.right_pane.nodeSelected.connect(self.on_branch_select)
-        
+
         # Node hover in network view
         if hasattr(self.right_pane.network_view, 'nodeHovered'):
             self.right_pane.network_view.nodeHovered.connect(self.on_node_hover)
-        
+
         # Export button
         self.left_pane.control_panel.export_button.clicked.connect(self.export_conversation)
-        
+
         # Connect context menu actions to the main app methods
         self.left_pane.set_rabbithole_callback(self.branch_from_selection)
         self.left_pane.set_fork_callback(self.fork_from_selection)
-        
+
         # Save splitter state when it moves
         self.splitter.splitterMoved.connect(self.save_splitter_state)
     
@@ -2258,5 +2560,506 @@ class LiminalBackroomsApp(QMainWindow):
     def initialize_selectors(self):
         """Initialize the AI model selectors and prompt pair selector"""
         pass
+
+    # ===== New Enhancement Methods =====
+
+    def save_conversation(self):
+        """Save the current conversation to a JSON file"""
+        try:
+            from PyQt6.QtWidgets import QFileDialog
+
+            file_name, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Conversation",
+                "exports/conversation.json",
+                "JSON Files (*.json)"
+            )
+
+            if file_name:
+                conversation_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'turn_count': self.turn_count,
+                    'main_conversation': self.conversation,
+                    'branches': self.branch_conversations,
+                    'active_branch': self.active_branch
+                }
+
+                with open(file_name, 'w', encoding='utf-8') as f:
+                    json.dump(conversation_data, f, indent=2, ensure_ascii=False)
+
+                self.statusBar().showMessage(f"Conversation saved to {file_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Error saving conversation: {str(e)}")
+
+    def show_search_dialog(self):
+        """Show search dialog to find text in conversation"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Search Conversation")
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout()
+
+        # Search input
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Find:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Enter text to search...")
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        find_next_btn = QPushButton("Find Next")
+        find_prev_btn = QPushButton("Find Previous")
+        close_btn = QPushButton("Close")
+
+        find_next_btn.clicked.connect(lambda: self.find_text(True))
+        find_prev_btn.clicked.connect(lambda: self.find_text(False))
+        close_btn.clicked.connect(dialog.close)
+
+        button_layout.addWidget(find_next_btn)
+        button_layout.addWidget(find_prev_btn)
+        button_layout.addWidget(close_btn)
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+            }}
+            QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                padding: 5px;
+                border-radius: 3px;
+            }}
+            QPushButton {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['text_bright']};
+                border: none;
+                padding: 8px 16px;
+                border-radius: 3px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_blue_hover']};
+            }}
+        """)
+
+        dialog.exec()
+
+    def find_text(self, forward=True):
+        """Find text in the conversation display"""
+        if hasattr(self, 'search_input'):
+            search_text = self.search_input.text()
+            if search_text:
+                from PyQt6.QtGui import QTextDocument
+                flags = QTextDocument.FindFlag(0)
+                if not forward:
+                    flags = QTextDocument.FindFlag.FindBackward
+
+                found = self.left_pane.conversation_display.find(search_text, flags)
+                if not found:
+                    # Wrap around
+                    cursor = self.left_pane.conversation_display.textCursor()
+                    if forward:
+                        cursor.movePosition(QTextCursor.MoveOperation.Start)
+                    else:
+                        cursor.movePosition(QTextCursor.MoveOperation.End)
+                    self.left_pane.conversation_display.setTextCursor(cursor)
+                    self.left_pane.conversation_display.find(search_text, flags)
+
+    def copy_selected_text(self):
+        """Copy selected text from conversation display"""
+        self.left_pane.conversation_display.copy()
+
+    def zoom_in_graph(self):
+        """Zoom in the network graph"""
+        if hasattr(self.right_pane, 'network_view'):
+            self.right_pane.network_view.zoom_factor *= 1.2
+            self.right_pane.network_view.update()
+            self.statusBar().showMessage(f"Zoom: {int(self.right_pane.network_view.zoom_factor * 100)}%")
+
+    def zoom_out_graph(self):
+        """Zoom out the network graph"""
+        if hasattr(self.right_pane, 'network_view'):
+            self.right_pane.network_view.zoom_factor /= 1.2
+            self.right_pane.network_view.update()
+            self.statusBar().showMessage(f"Zoom: {int(self.right_pane.network_view.zoom_factor * 100)}%")
+
+    def reset_zoom_graph(self):
+        """Reset network graph zoom to 100%"""
+        if hasattr(self.right_pane, 'network_view'):
+            self.right_pane.network_view.zoom_factor = 1.0
+            self.right_pane.network_view.update()
+            self.statusBar().showMessage("Zoom reset to 100%")
+
+    def toggle_theme(self):
+        """Toggle between dark and light themes"""
+        if not hasattr(self, 'current_theme'):
+            self.current_theme = 'dark'
+
+        if self.current_theme == 'dark':
+            self.apply_light_theme()
+            self.current_theme = 'light'
+        else:
+            self.apply_dark_theme()
+            self.current_theme = 'dark'
+
+        self.statusBar().showMessage(f"Theme switched to {self.current_theme}")
+
+    def apply_light_theme(self):
+        """Apply light theme to the application"""
+        light_colors = {
+            'bg_dark': '#FFFFFF',
+            'bg_medium': '#F5F5F5',
+            'bg_light': '#E0E0E0',
+            'accent_blue': '#0066CC',
+            'accent_blue_hover': '#0052A3',
+            'accent_blue_active': '#003D7A',
+            'text_normal': '#000000',
+            'text_dim': '#666666',
+            'text_bright': '#000000',
+            'border': '#CCCCCC',
+            'border_highlight': '#999999',
+        }
+
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {light_colors['bg_dark']};
+                color: {light_colors['text_normal']};
+            }}
+            QWidget {{
+                background-color: {light_colors['bg_dark']};
+                color: {light_colors['text_normal']};
+            }}
+        """)
+
+    def undo_action(self):
+        """Undo the last action"""
+        if not hasattr(self, 'undo_stack'):
+            self.undo_stack = []
+            self.redo_stack = []
+
+        if self.undo_stack:
+            # Save current state to redo stack
+            current_state = {
+                'conversation': self.conversation.copy(),
+                'branch_conversations': json.loads(json.dumps(self.branch_conversations)),
+                'active_branch': self.active_branch
+            }
+            self.redo_stack.append(current_state)
+
+            # Restore previous state
+            previous_state = self.undo_stack.pop()
+            self.conversation = previous_state['conversation']
+            self.branch_conversations = previous_state['branch_conversations']
+            self.active_branch = previous_state['active_branch']
+
+            # Update display
+            self.left_pane.update_conversation(self.conversation)
+            self.statusBar().showMessage("Undo completed")
+        else:
+            self.statusBar().showMessage("Nothing to undo")
+
+    def redo_action(self):
+        """Redo the last undone action"""
+        if not hasattr(self, 'redo_stack'):
+            self.redo_stack = []
+
+        if self.redo_stack:
+            # Save current state to undo stack
+            current_state = {
+                'conversation': self.conversation.copy(),
+                'branch_conversations': json.loads(json.dumps(self.branch_conversations)),
+                'active_branch': self.active_branch
+            }
+            self.undo_stack.append(current_state)
+
+            # Restore redo state
+            redo_state = self.redo_stack.pop()
+            self.conversation = redo_state['conversation']
+            self.branch_conversations = redo_state['branch_conversations']
+            self.active_branch = redo_state['active_branch']
+
+            # Update display
+            self.left_pane.update_conversation(self.conversation)
+            self.statusBar().showMessage("Redo completed")
+        else:
+            self.statusBar().showMessage("Nothing to redo")
+
+    def save_state_for_undo(self):
+        """Save current state to undo stack"""
+        if not hasattr(self, 'undo_stack'):
+            self.undo_stack = []
+            self.redo_stack = []
+
+        state = {
+            'conversation': self.conversation.copy() if hasattr(self, 'conversation') else [],
+            'branch_conversations': json.loads(json.dumps(self.branch_conversations)) if hasattr(self, 'branch_conversations') else {},
+            'active_branch': self.active_branch if hasattr(self, 'active_branch') else None
+        }
+        self.undo_stack.append(state)
+
+        # Clear redo stack when new action is performed
+        self.redo_stack = []
+
+        # Limit undo stack size
+        if len(self.undo_stack) > 50:
+            self.undo_stack.pop(0)
+
+    def update_statistics(self):
+        """Update the statistics panel with current session data"""
+        if hasattr(self.left_pane, 'control_panel'):
+            # Calculate elapsed time
+            elapsed = time.time() - self.session_start_time
+            hours = int(elapsed // 3600)
+            minutes = int((elapsed % 3600) // 60)
+            seconds = int(elapsed % 60)
+            time_str = f"{hours}:{minutes:02d}:{seconds:02d}"
+
+            # Update statistics labels
+            self.left_pane.control_panel.stats_time.setText(f"Elapsed: {time_str}")
+            self.left_pane.control_panel.stats_turns.setText(f"Turns: {self.turn_count}")
+            self.left_pane.control_panel.stats_messages.setText(f"Messages: {len(self.conversation)}")
+            self.left_pane.control_panel.stats_branches.setText(f"Branches: {len(self.branch_conversations)}")
+
+    def auto_save(self):
+        """Automatically save the current conversation"""
+        try:
+            if not os.path.exists('exports/autosave'):
+                os.makedirs('exports/autosave')
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = f'exports/autosave/conversation_{timestamp}.json'
+
+            conversation_data = {
+                'timestamp': datetime.now().isoformat(),
+                'turn_count': self.turn_count,
+                'main_conversation': self.conversation,
+                'branches': self.branch_conversations,
+                'active_branch': self.active_branch
+            }
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(conversation_data, f, indent=2, ensure_ascii=False)
+
+            self.statusBar().showMessage(f"Auto-saved to {file_path}", 3000)
+
+            # Keep only the last 10 autosaves
+            autosave_files = sorted(Path('exports/autosave').glob('conversation_*.json'))
+            if len(autosave_files) > 10:
+                for old_file in autosave_files[:-10]:
+                    old_file.unlink()
+
+        except Exception as e:
+            print(f"Auto-save error: {e}")
+
+    def play_notification_sound(self):
+        """Play a notification sound when AI turn completes"""
+        try:
+            # Use system beep as a simple notification
+            # On Linux, this uses the system bell
+            # On Windows, this uses the default beep
+            # On macOS, this uses NSBeep
+            if sys.platform == 'darwin':  # macOS
+                os.system('afplay /System/Library/Sounds/Glass.aiff')
+            elif sys.platform == 'win32':  # Windows
+                import winsound
+                winsound.MessageBeep(winsound.MB_OK)
+            else:  # Linux
+                os.system('paplay /usr/share/sounds/freedesktop/stereo/complete.oga 2>/dev/null || printf "\\a"')
+        except Exception as e:
+            print(f"Could not play notification sound: {e}")
+
+    def bookmark_current_node(self):
+        """Bookmark the current conversation node"""
+        if not hasattr(self, 'bookmarks'):
+            self.bookmarks = []
+
+        node_id = self.active_branch if self.active_branch else 'main'
+
+        # Toggle bookmark
+        if node_id in self.bookmarks:
+            self.bookmarks.remove(node_id)
+            self.statusBar().showMessage(f"Bookmark removed from {node_id}")
+        else:
+            self.bookmarks.append(node_id)
+            self.statusBar().showMessage(f"Bookmarked {node_id}")
+
+        # Update visual indicator in network graph
+        if hasattr(self.right_pane, 'network_view'):
+            self.right_pane.network_view.update()
+
+    def show_bookmarks(self):
+        """Show a dialog with all bookmarked nodes"""
+        if not hasattr(self, 'bookmarks') or not self.bookmarks:
+            QMessageBox.information(self, "Bookmarks", "No bookmarks saved yet.")
+            return
+
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Bookmarks")
+        dialog.setMinimumSize(400, 300)
+
+        layout = QVBoxLayout()
+
+        bookmark_list = QListWidget()
+        for bookmark_id in self.bookmarks:
+            if bookmark_id == 'main':
+                bookmark_list.addItem("Main Conversation")
+            elif bookmark_id in self.branch_conversations:
+                branch_data = self.branch_conversations[bookmark_id]
+                text = branch_data.get('selected_text', bookmark_id)[:50]
+                bookmark_list.addItem(f"{branch_data.get('type', 'branch').capitalize()}: {text}")
+
+        bookmark_list.itemDoubleClicked.connect(lambda item: self.jump_to_bookmark(item, dialog))
+        layout.addWidget(bookmark_list)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(close_btn)
+
+        dialog.setLayout(layout)
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+            }}
+            QListWidget {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+            }}
+            QPushButton {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['text_bright']};
+                padding: 8px 16px;
+                border-radius: 3px;
+            }}
+        """)
+
+        dialog.exec()
+
+    def jump_to_bookmark(self, item, dialog):
+        """Jump to a bookmarked node"""
+        index = item.listWidget().row(item)
+        if index < len(self.bookmarks):
+            bookmark_id = self.bookmarks[index]
+            self.on_branch_select(bookmark_id)
+            dialog.close()
+
+    def show_shortcuts_help(self):
+        """Show keyboard shortcuts help dialog"""
+        shortcuts_text = """
+<h2>Keyboard Shortcuts</h2>
+
+<h3>File Operations</h3>
+<table>
+<tr><td><b>Ctrl+S</b></td><td>Save conversation</td></tr>
+<tr><td><b>Ctrl+E</b></td><td>Export conversation</td></tr>
+<tr><td><b>Ctrl+L</b></td><td>Clear conversation</td></tr>
+<tr><td><b>Ctrl+Q</b></td><td>Exit application</td></tr>
+</table>
+
+<h3>Edit Operations</h3>
+<table>
+<tr><td><b>Ctrl+Z</b></td><td>Undo</td></tr>
+<tr><td><b>Ctrl+Y</b></td><td>Redo</td></tr>
+<tr><td><b>Ctrl+F</b></td><td>Search in conversation</td></tr>
+<tr><td><b>Ctrl+C</b></td><td>Copy selected text</td></tr>
+</table>
+
+<h3>View Operations</h3>
+<table>
+<tr><td><b>Ctrl++</b></td><td>Zoom in network graph</td></tr>
+<tr><td><b>Ctrl+-</b></td><td>Zoom out network graph</td></tr>
+<tr><td><b>Ctrl+0</b></td><td>Reset zoom</td></tr>
+<tr><td><b>Ctrl+T</b></td><td>Toggle dark/light theme</td></tr>
+</table>
+
+<h3>Navigation</h3>
+<table>
+<tr><td><b>Ctrl+B</b></td><td>Bookmark current node</td></tr>
+<tr><td><b>Ctrl+Shift+B</b></td><td>Show bookmarks</td></tr>
+</table>
+        """
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Keyboard Shortcuts")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(shortcuts_text)
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+            }}
+            QLabel {{
+                color: {COLORS['text_normal']};
+            }}
+            QPushButton {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['text_bright']};
+                padding: 5px 15px;
+                border-radius: 3px;
+            }}
+        """)
+        msg.exec()
+
+    def show_about_dialog(self):
+        """Show about dialog"""
+        about_text = f"""
+<h2>Liminal Backrooms v0.8</h2>
+<p>An advanced AI conversation platform with branching capabilities.</p>
+
+<h3>Features:</h3>
+<ul>
+<li>Multi-model AI conversations</li>
+<li>Conversation branching (Rabbithole & Fork)</li>
+<li>Network graph visualization</li>
+<li>Auto-save functionality</li>
+<li>Search & bookmarks</li>
+<li>Undo/Redo support</li>
+<li>Dark/Light themes</li>
+<li>Drag & drop image support</li>
+</ul>
+
+<p><b>Session Statistics:</b></p>
+<ul>
+<li>Turns: {self.turn_count}</li>
+<li>Messages: {len(self.conversation)}</li>
+<li>Branches: {len(self.branch_conversations)}</li>
+</ul>
+
+<p style="margin-top: 20px;">
+<i>Explore the liminal spaces between AI minds...</i>
+</p>
+        """
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("About Liminal Backrooms")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(about_text)
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+            }}
+            QLabel {{
+                color: {COLORS['text_normal']};
+            }}
+            QPushButton {{
+                background-color: {COLORS['accent_blue']};
+                color: {COLORS['text_bright']};
+                padding: 5px 15px;
+                border-radius: 3px;
+            }}
+        """)
+        msg.exec()
 
     # Removed: create_new_living_document
