@@ -88,7 +88,7 @@ You `MUST` always use this tool when:
 
 ### Rabbitholing (🐇)
 - **Purpose**: Deep dive into a specific concept
-- **Behavior**: 
+- **Behavior**:
   - Copies full parent conversation context
   - First TWO AI responses use focused prompt: `"'{selected_text}'!!!"`
   - Subsequent responses revert to standard prompts
@@ -185,4 +185,3 @@ poetry run ruff check .
 # Format code
 poetry run ruff format .
 ```
-
