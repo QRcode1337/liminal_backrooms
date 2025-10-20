@@ -64,15 +64,18 @@ class Worker(QRunnable):
         self.branch_id = branch_id
         self.gui = gui
         
-        # Create signals object
+        # Create signals object - ensure it stays alive
         self.signals = WorkerSignals()
+        # Keep a reference to prevent garbage collection
+        self._signals_ref = self.signals
     
     @pyqtSlot()
     def run(self):
         """Process the AI turn when the thread is started"""
         try:
             # Emit progress update
-            self.signals.progress.emit(f"Processing {self.ai_name} turn with {self.model}...")
+            if hasattr(self, 'signals') and self.signals is not None:
+                self.signals.progress.emit(f"Processing {self.ai_name} turn with {self.model}...")
             
             # Process the turn
             result = ai_turn(
@@ -84,25 +87,27 @@ class Worker(QRunnable):
             )
             
             # Emit both the text response and the full result object
-            if isinstance(result, dict):
-                response_content = result.get('content', '')
-                # Emit the simple text response for backward compatibility
-                self.signals.response.emit(self.ai_name, response_content)
-                # Also emit the full result object for HTML contribution processing
-                self.signals.result.emit(self.ai_name, result)
-            else:
-                # Handle simple string responses
-                self.signals.response.emit(self.ai_name, result if result else "")
-                self.signals.result.emit(self.ai_name, {"content": result, "model": self.model})
-            
-            # Emit finished signal
-            self.signals.finished.emit()
+            if hasattr(self, 'signals') and self.signals is not None:
+                if isinstance(result, dict):
+                    response_content = result.get('content', '')
+                    # Emit the simple text response for backward compatibility
+                    self.signals.response.emit(self.ai_name, response_content)
+                    # Also emit the full result object for HTML contribution processing
+                    self.signals.result.emit(self.ai_name, result)
+                else:
+                    # Handle simple string responses
+                    self.signals.response.emit(self.ai_name, result if result else "")
+                    self.signals.result.emit(self.ai_name, {"content": result, "model": self.model})
+                
+                # Emit finished signal
+                self.signals.finished.emit()
             
         except Exception as e:
             # Emit error signal
-            self.signals.error.emit(str(e))
-            # Still emit finished signal even if there's an error
-            self.signals.finished.emit()
+            if hasattr(self, 'signals') and self.signals is not None:
+                self.signals.error.emit(str(e))
+                # Still emit finished signal even if there's an error
+                self.signals.finished.emit()
 
 def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None):
     """Execute an AI turn with the given parameters"""
@@ -180,6 +185,8 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     
     # Filter out any existing system messages that might interfere
     filtered_conversation = []
+    seen_content = set()  # Track seen content for O(1) duplicate detection
+
     for msg in conversation:
         if not isinstance(msg, dict):
             # Convert plain text to dictionary
@@ -201,16 +208,13 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         if msg.get("role") == "system" and msg.get("_type"):
             continue
             
-        # Skip duplicate messages - check if this exact content exists already
-        is_duplicate = False
-        for existing in filtered_conversation:
-            if existing.get("content") == msg.get("content"):
-                is_duplicate = True
-                print(f"Skipping duplicate message: {msg.get('content')[:30]}...")
-                break
-                
-        if not is_duplicate:
-            filtered_conversation.append(msg)
+        # Skip duplicate messages using set for O(1) lookup
+        content = msg.get("content", "")
+        if content in seen_content:
+            continue
+
+        seen_content.add(content)
+        filtered_conversation.append(msg)
     
     # Process filtered conversation
     for i, msg in enumerate(filtered_conversation):
@@ -576,6 +580,10 @@ class ConversationManager:
         worker1 = Worker("AI-1", self.app.main_conversation, ai_1_model, ai_1_prompt, gui=self.app)
         worker2 = Worker("AI-2", self.app.main_conversation, ai_2_model, ai_2_prompt, gui=self.app)
         
+        # Store workers to prevent garbage collection
+        self.workers.append(worker1)
+        self.workers.append(worker2)
+        
         # Connect signals
         worker1.signals.response.connect(self.on_ai_response_received)
         worker1.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
@@ -752,6 +760,10 @@ class ConversationManager:
         # Create worker threads for AI-1 and AI-2
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        
+        # Store workers to prevent garbage collection
+        self.workers.append(worker1)
+        self.workers.append(worker2)
         
         # Connect signals
         worker1.signals.response.connect(self.on_ai_response_received)
@@ -1180,6 +1192,10 @@ class ConversationManager:
         # Create worker threads for AI-1 and AI-2
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        
+        # Store workers to prevent garbage collection
+        self.workers.append(worker1)
+        self.workers.append(worker2)
         
         # Connect signals
         worker1.signals.response.connect(self.on_ai_response_received)

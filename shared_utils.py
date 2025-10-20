@@ -29,6 +29,11 @@ anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
+# Pre-compile regex patterns for performance
+HTML_CONTRIBUTION_PATTERN = re.compile(r'(?i)[-_\s]*HTML\s*CONTRIBUTION[-_\s]*')
+THINK_TAG_PATTERN = re.compile(r'<(think|thinking)>(.*?)</\1>', re.DOTALL | re.IGNORECASE)
+THINK_TAG_REMOVE_PATTERN = re.compile(r'<(think|thinking)>.*?</\1>', re.DOTALL | re.IGNORECASE)
+
 def call_claude_api(prompt, messages, model_id, system_prompt=None):
     """Call the Claude API with the given messages and prompt"""
     api_key = os.getenv("ANTHROPIC_API_KEY")

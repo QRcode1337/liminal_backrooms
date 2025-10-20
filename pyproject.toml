@@ -3,6 +3,7 @@ name = "debate"
 version = "0.1.0"
 description = "AI-to-AI debate system"
 authors = ["Your Name <you@example.com>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"

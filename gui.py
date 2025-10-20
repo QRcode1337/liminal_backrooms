@@ -166,49 +166,68 @@ class NetworkGraphWidget(QWidget):
     
     def apply_collision_dynamics(self):
         """Apply collision dynamics to prevent node overlap"""
+        # Skip physics if too few nodes or physics has settled
+        if len(self.nodes) < 3:
+            return
+
+        # Check if physics has settled (all velocities near zero)
+        if hasattr(self, '_physics_settled') and self._physics_settled:
+            max_velocity = max(
+                (abs(vx) + abs(vy) for vx, vy in self.node_velocities.values()),
+                default=0
+            )
+            if max_velocity < 0.01:  # Physics threshold
+                return
+
         # Initialize velocities if needed
         for node_id in self.nodes:
             if node_id not in self.node_velocities:
                 self.node_velocities[node_id] = (0, 0)
-        
+
         # Calculate repulsive forces between nodes
         new_velocities = {}
-        for node_id in self.nodes:
+        node_list = list(self.nodes)  # Convert to list once
+
+        for i, node_id in enumerate(node_list):
             if node_id not in self.node_positions:
                 continue
-                
+
             vx, vy = self.node_velocities.get(node_id, (0, 0))
             x1, y1 = self.node_positions[node_id]
-            
-            # Apply repulsion between nodes
-            for other_id in self.nodes:
-                if other_id == node_id or other_id not in self.node_positions:
+
+            # Apply repulsion between nodes - only check nodes after current (avoid duplicate pairs)
+            for other_id in node_list[i+1:]:
+                if other_id not in self.node_positions:
                     continue
-                    
+
                 x2, y2 = self.node_positions[other_id]
-                
+
                 # Calculate distance
                 dx = x1 - x2
                 dy = y1 - y2
                 distance = max(0.1, math.sqrt(dx*dx + dy*dy))  # Avoid division by zero
-                
+
                 # Get node sizes
                 size1 = math.sqrt(self.node_sizes.get(node_id, 400))
                 size2 = math.sqrt(self.node_sizes.get(other_id, 400))
                 min_distance = (size1 + size2) / 2
-                
+
                 # Apply repulsive force if nodes are too close
                 if distance < min_distance * 2:
                     # Normalize direction vector
                     nx = dx / distance
                     ny = dy / distance
-                    
+
                     # Calculate repulsion strength (stronger when closer)
                     strength = self.repulsion_strength * (1.0 - distance / (min_distance * 2))
-                    
-                    # Apply force
+
+                    # Apply force to both nodes (Newton's third law)
                     vx += nx * strength
                     vy += ny * strength
+
+                    # Apply opposite force to other node
+                    other_vx, other_vy = new_velocities.get(other_id, self.node_velocities.get(other_id, (0, 0)))
+                    new_velocities[other_id] = (other_vx - nx * strength, other_vy - ny * strength)
             
             # Apply attraction along edges
             for edge in self.edges:
@@ -243,22 +262,30 @@ class NetworkGraphWidget(QWidget):
             # Apply damping to prevent oscillation
             vx *= self.damping
             vy *= self.damping
-            
+
             # Store new velocity
             new_velocities[node_id] = (vx, vy)
-        
+
         # Update positions based on velocities
+        max_velocity = 0.0
         for node_id, (vx, vy) in new_velocities.items():
             if node_id in self.node_positions:
                 # Skip the main node to keep it centered
                 if node_id == 'main':
                     continue
-                    
+
                 x, y = self.node_positions[node_id]
                 self.node_positions[node_id] = (x + vx, y + vy)
-        
+
+                # Track maximum velocity for settling detection
+                velocity_magnitude = abs(vx) + abs(vy)
+                max_velocity = max(max_velocity, velocity_magnitude)
+
         # Update velocities for next frame
         self.node_velocities = new_velocities
+
+        # Check if physics has settled
+        self._physics_settled = max_velocity < 0.01
         
     def paintEvent(self, event):
         """Paint the network graph"""
