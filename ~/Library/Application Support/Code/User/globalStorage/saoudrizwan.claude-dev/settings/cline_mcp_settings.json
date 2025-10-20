@@ -2,8 +2,8 @@
   "mcpServers": {
     "github.com/chroma-core/chroma": {
       "command": "python",
-      "args": ["/Users/patrickgallowaypro/Documents/Cline/MCP/chroma-server/chroma_mcp_server.py"],
-      "cwd": "/Users/patrickgallowaypro/Documents/Cline/MCP/chroma-server",
+      "args": ["${env:MCP_CHROMA_SERVER_PATH}/chroma_mcp_server.py"],
+      "cwd": "${env:MCP_CHROMA_SERVER_PATH}",
       "disabled": false,
       "autoApprove": []
     },
