@@ -192,7 +192,11 @@ class NetworkGraphWidget(QWidget):
             if node_id not in self.node_positions:
                 continue
 
-            vx, vy = self.node_velocities.get(node_id, (0, 0))
+            # Start with any velocity already accumulated for this node
+            vx, vy = new_velocities.get(
+                node_id,
+                self.node_velocities.get(node_id, (0, 0))
+            )
             x1, y1 = self.node_positions[node_id]
 
             # Apply repulsion between nodes - only check nodes after current (avoid duplicate pairs)
