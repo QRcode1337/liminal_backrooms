@@ -34,7 +34,6 @@ TOGETHER_TOP_P = 0.95
 # Image generation configuration
 IMAGE_WIDTH = 1024
 IMAGE_HEIGHT = 1024
-IMAGE_CLEANUP_MAX_AGE_HOURS = 24
 
 # Sora video generation configuration
 SORA_POLL_INTERVAL_SECONDS = 5.0
