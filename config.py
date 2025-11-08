@@ -37,7 +37,6 @@ IMAGE_HEIGHT = 1024
 
 # Sora video generation configuration
 SORA_POLL_INTERVAL_SECONDS = 5.0
-SORA_VERBOSE = True  # Can be overridden by SORA_VERBOSE env var
 
 # Available AI models
 AI_MODELS = {
