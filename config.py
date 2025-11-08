@@ -10,6 +10,36 @@ TURN_DELAY = 2  # Delay between turns (in seconds)
 SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT = False  # Set to True to include Chain of Thought in conversation history
 SHARE_CHAIN_OF_THOUGHT = False  # Set to True to allow AIs to see each other's Chain of Thought
 
+# API Configuration
+API_MAX_TOKENS = 4000  # Maximum tokens for API responses
+API_TEMPERATURE = 1.0  # Temperature setting for API calls
+API_TIMEOUT = 60  # Timeout for API requests (in seconds)
+
+# LLaMA specific configuration
+LLAMA_MAX_TOKENS = 3000
+LLAMA_TEMPERATURE = 1.1
+LLAMA_TOP_P = 0.99
+LLAMA_REPETITION_PENALTY = 1.0
+LLAMA_MAX_HISTORY = 10  # Maximum number of messages to keep in history
+
+# DeepSeek specific configuration
+DEEPSEEK_MAX_TOKENS = 8000
+DEEPSEEK_TEMPERATURE = 1.0
+
+# Together AI specific configuration
+TOGETHER_MAX_TOKENS = 500
+TOGETHER_TEMPERATURE = 0.9
+TOGETHER_TOP_P = 0.95
+
+# Image generation configuration
+IMAGE_WIDTH = 1024
+IMAGE_HEIGHT = 1024
+IMAGE_CLEANUP_MAX_AGE_HOURS = 24
+
+# Sora video generation configuration
+SORA_POLL_INTERVAL_SECONDS = 5.0
+SORA_VERBOSE = True  # Can be overridden by SORA_VERBOSE env var
+
 # Available AI models
 AI_MODELS = {
     "Claude 4.5 Sonnet 20250929": "claude-sonnet-4-5-20250929",

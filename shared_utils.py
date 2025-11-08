@@ -15,6 +15,7 @@ import base64
 from together import Together
 from openai import OpenAI
 import re
+from typing import Optional, Dict, List, Any, Union
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -23,13 +24,35 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Import configuration constants
+from config import (
+    API_MAX_TOKENS, API_TEMPERATURE, API_TIMEOUT,
+    LLAMA_MAX_TOKENS, LLAMA_TEMPERATURE, LLAMA_TOP_P, LLAMA_REPETITION_PENALTY, LLAMA_MAX_HISTORY,
+    DEEPSEEK_MAX_TOKENS, DEEPSEEK_TEMPERATURE,
+    TOGETHER_MAX_TOKENS, TOGETHER_TEMPERATURE, TOGETHER_TOP_P,
+    IMAGE_WIDTH, IMAGE_HEIGHT,
+    SORA_POLL_INTERVAL_SECONDS
+)
+
 # Initialize Anthropic client with API key
 anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-def call_claude_api(prompt, messages, model_id, system_prompt=None):
+def call_claude_api(
+    prompt: str,
+    messages: List[Dict[str, Any]],
+    model_id: str,
+    system_prompt: Optional[str] = None
+) -> str:
     """Call the Claude API with the given messages and prompt"""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -40,8 +63,8 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None):
     # Ensure we have a system prompt
     payload = {
         "model": model_id,
-        "max_tokens": 4000,
-        "temperature": 1        
+        "max_tokens": API_MAX_TOKENS,
+        "temperature": API_TEMPERATURE
     }
     
     # Set system if provided
@@ -92,14 +115,25 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None):
                 if content_item.get('type') == 'text':
                     return content_item.get('text', '')
             # Fallback if no text type content is found
+            logger.warning("No text type content found in Claude API response")
             return str(data['content'])
+        logger.error("No content in Claude API response")
         return "No content in response"
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error calling Claude API: {e}")
+        return f"Error calling Claude API: {str(e)}"
     except Exception as e:
+        logger.exception(f"Unexpected error calling Claude API: {e}")
         return f"Error calling Claude API: {str(e)}"
 
-def call_llama_api(prompt, conversation_history, model, system_prompt):
-    # Only use the last 3 exchanges to prevent context length issues
-    recent_history = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+def call_llama_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    system_prompt: str
+) -> Optional[str]:
+    # Only use the last N exchanges to prevent context length issues
+    recent_history = conversation_history[-LLAMA_MAX_HISTORY:] if len(conversation_history) > LLAMA_MAX_HISTORY else conversation_history
     
     # Format the conversation history for LLaMA
     formatted_history = ""
@@ -118,10 +152,10 @@ def call_llama_api(prompt, conversation_history, model, system_prompt):
             input={
                 "prompt": formatted_history,
                 "system_prompt": system_prompt,
-                "max_tokens": 3000,
-                "temperature": 1.1,
-                "top_p": 0.99,
-                "repetition_penalty": 1.0
+                "max_tokens": LLAMA_MAX_TOKENS,
+                "temperature": LLAMA_TEMPERATURE,
+                "top_p": LLAMA_TOP_P,
+                "repetition_penalty": LLAMA_REPETITION_PENALTY
             },
             stream=True  # Enable streaming
         ):
@@ -133,11 +167,19 @@ def call_llama_api(prompt, conversation_history, model, system_prompt):
         # Join all chunks for the final response
         response = ''.join(response_chunks)
         return response
+    except replicate.exceptions.ReplicateError as e:
+        logger.error(f"Replicate API error calling LLaMA: {e}")
+        return None
     except Exception as e:
-        print(f"Error calling LLaMA API: {e}")
+        logger.exception(f"Unexpected error calling LLaMA API: {e}")
         return None
 
-def call_openai_api(prompt, conversation_history, model, system_prompt):
+def call_openai_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    system_prompt: str
+) -> Optional[str]:
     try:
         messages = []
         
@@ -152,10 +194,9 @@ def call_openai_api(prompt, conversation_history, model, system_prompt):
         response = openai.chat.completions.create(
             model=model,
             messages=messages,
-            # Increase max_tokens and add n parameter
-            max_tokens=4000,
+            max_tokens=API_MAX_TOKENS,
             n=1,
-            temperature=1,
+            temperature=API_TEMPERATURE,
             stream=True
         )
         
@@ -166,12 +207,20 @@ def call_openai_api(prompt, conversation_history, model, system_prompt):
                 
         full_reply = ''.join(collected_messages)
         return full_reply
-        
+
+    except openai.APIError as e:
+        logger.error(f"OpenAI API error: {e}")
+        return None
     except Exception as e:
-        print(f"Error calling OpenAI API: {e}")
+        logger.exception(f"Unexpected error calling OpenAI API: {e}")
         return None
 
-def call_openrouter_api(prompt, conversation_history, model, system_prompt):
+def call_openrouter_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    system_prompt: str
+) -> Optional[str]:
     """Call the OpenRouter API to access various LLM models."""
     try:
         headers = {
@@ -198,8 +247,8 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt):
         payload = {
             "model": model,  # Using the exact model name from config
             "messages": messages,
-            "temperature": 1,
-            "max_tokens": 4000,
+            "temperature": API_TEMPERATURE,
+            "max_tokens": API_MAX_TOKENS,
             "stream": False
         }
         
@@ -211,7 +260,7 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt):
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=60  # Add timeout
+            timeout=API_TIMEOUT
         )
         
         print(f"Response status: {response.status_code}")
@@ -251,12 +300,17 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt):
         print(f"Error type: {type(e)}")
         return f"Error: {str(e)}"
 
-def call_replicate_api(prompt, conversation_history, model, gui=None):
+def call_replicate_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    gui: Optional[Any] = None
+) -> Optional[Dict[str, Any]]:
     try:
         # Only use the prompt, ignore conversation history
         input_params = {
-            "width": 1024,
-            "height": 1024,
+            "width": IMAGE_WIDTH,
+            "height": IMAGE_HEIGHT,
             "prompt": prompt
         }
         
@@ -292,12 +346,23 @@ def call_replicate_api(prompt, conversation_history, model, gui=None):
             "image_url": image_url,
             "image_path": str(image_path)
         }
-        
+
+    except replicate.exceptions.ReplicateError as e:
+        logger.error(f"Replicate API error calling Flux: {e}")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error downloading image from Flux: {e}")
+        return None
     except Exception as e:
-        print(f"Error calling Flux API: {e}")
+        logger.exception(f"Unexpected error calling Flux API: {e}")
         return None
 
-def call_deepseek_api(prompt, conversation_history, model, system_prompt):
+def call_deepseek_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    system_prompt: str
+) -> Optional[Dict[str, Any]]:
     """Call the DeepSeek model through Replicate API."""
     try:
         # Format messages for the conversation history
@@ -331,8 +396,8 @@ def call_deepseek_api(prompt, conversation_history, model, system_prompt):
             "deepseek-ai/deepseek-r1",
             input={
                 "prompt": formatted_history,
-                "max_tokens": 8000,
-                "temperature": 1
+                "max_tokens": DEEPSEEK_MAX_TOKENS,
+                "temperature": DEEPSEEK_TEMPERATURE
             }
         )
         
@@ -406,19 +471,21 @@ def call_deepseek_api(prompt, conversation_history, model, system_prompt):
             result["html_contribution"] = html_contribution
             
         return result
-        
+
+    except replicate.exceptions.ReplicateError as e:
+        logger.error(f"Replicate API error calling DeepSeek: {e}")
+        return None
     except Exception as e:
-        print(f"Error calling DeepSeek via Replicate: {e}")
-        print(f"Error type: {type(e)}")
+        logger.exception(f"Unexpected error calling DeepSeek via Replicate: {e}")
         return None
 
-def setup_image_directory():
+def setup_image_directory() -> Path:
     """Create an 'images' directory in the project root if it doesn't exist"""
     image_dir = Path("images")
     image_dir.mkdir(exist_ok=True)
     return image_dir
 
-def cleanup_old_images(image_dir, max_age_hours=24):
+def cleanup_old_images(image_dir: Path, max_age_hours: int = 24) -> None:
     """Remove images older than max_age_hours"""
     current_time = datetime.now()
     for image_file in image_dir.glob("*.jpg"):
@@ -426,7 +493,7 @@ def cleanup_old_images(image_dir, max_age_hours=24):
         if (current_time - file_age).total_seconds() > max_age_hours * 3600:
             image_file.unlink()
 
-def load_ai_memory(ai_number):
+def load_ai_memory(ai_number: int) -> List[Dict[str, str]]:
     """Load AI conversation memory from JSON files"""
     try:
         memory_path = f"memory/ai{ai_number}/conversations.json"
@@ -440,7 +507,7 @@ def load_ai_memory(ai_number):
         print(f"Error loading AI{ai_number} memory: {e}")
         return []
 
-def create_memory_prompt(conversations):
+def create_memory_prompt(conversations: List[Dict[str, str]]) -> str:
     """Convert memory JSON into conversation examples"""
     if not conversations:
         return ""
@@ -456,12 +523,13 @@ def create_memory_prompt(conversations):
     return prompt 
 
 
-def print_conversation_state(conversation):
+def print_conversation_state(conversation: List[Dict[str, Any]]) -> None:
+    """Print current conversation state for debugging"""
     print("Current conversation state:")
     for message in conversation:
         print(f"{message['role']}: {message['content'][:50]}...")  # Print first 50 characters of each message
 
-def call_claude_vision_api(image_url):
+def call_claude_vision_api(image_url: str) -> Optional[str]:
     """Have Claude analyze the generated image"""
     try:
         response = anthropic.messages.create(
@@ -486,10 +554,11 @@ def call_claude_vision_api(image_url):
         )
         return response.content[0].text
     except Exception as e:
-        print(f"Error in vision analysis: {e}")
+        logger.exception(f"Error in Claude vision analysis: {e}")
         return None
 
-def list_together_models():
+def list_together_models() -> None:
+    """List available Together AI models"""
     try:
         headers = {
             "Authorization": f"Bearer {os.getenv('TOGETHERAI_API_KEY')}",
@@ -512,7 +581,8 @@ def list_together_models():
     except Exception as e:
         print(f"Error listing models: {str(e)}")
 
-def start_together_model(model_id):
+def start_together_model(model_id: str) -> bool:
+    """Start a Together AI model"""
     try:
         headers = {
             "Authorization": f"Bearer {os.getenv('TOGETHERAI_API_KEY')}",
@@ -544,7 +614,13 @@ def start_together_model(model_id):
         print(f"Error starting model: {str(e)}")
         return False
 
-def call_together_api(prompt, conversation_history, model, system_prompt):
+def call_together_api(
+    prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    model: str,
+    system_prompt: str
+) -> Optional[str]:
+    """Call the Together AI API"""
     try:
         headers = {
             "Authorization": f"Bearer {os.getenv('TOGETHERAI_API_KEY')}",
@@ -567,9 +643,9 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
         payload = {
             "model": model,
             "messages": messages,
-            "max_tokens": 500,
-            "temperature": 0.9,
-            "top_p": 0.95,
+            "max_tokens": TOGETHER_MAX_TOKENS,
+            "temperature": TOGETHER_TEMPERATURE,
+            "top_p": TOGETHER_TOP_P,
         }
         
         response = requests.post(
@@ -590,27 +666,13 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
         print(f"Error calling Together API: {str(e)}")
         return None
 
-def read_shared_html(*args, **kwargs):
-    return ""
-
-def update_shared_html(*args, **kwargs):
-    return False
-
-def open_html_in_browser(file_path="conversation_full.html"):
+def open_html_in_browser(file_path: str = "conversation_full.html") -> None:
+    """Open HTML file in default browser"""
     import webbrowser, os
     full_path = os.path.abspath(file_path)
     webbrowser.open('file://' + full_path)
 
-def create_initial_living_document(*args, **kwargs):
-    return ""
-
-def read_living_document(*args, **kwargs):
-    return ""
-
-def process_living_document_edits(result, model_name):
-    return result
-
-def generate_image_from_text(text, model="gpt-image-1"):
+def generate_image_from_text(text: str, model: str = "gpt-image-1") -> Dict[str, Any]:
     """Generate an image based on text using OpenAI's image generation API"""
     try:
         # Create a directory for the images if it doesn't exist
@@ -643,8 +705,14 @@ def generate_image_from_text(text, model="gpt-image-1"):
             "image_path": str(image_path),
             "timestamp": timestamp
         }
+    except openai.APIError as e:
+        logger.error(f"OpenAI API error generating image: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
     except Exception as e:
-        print(f"Error generating image: {e}")
+        logger.exception(f"Unexpected error generating image: {e}")
         return {
             "success": False,
             "error": str(e)
