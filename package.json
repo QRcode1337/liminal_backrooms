@@ -1,0 +1,13 @@
+{
+  "name": "liminal_backrooms",
+  "version": "0.1.0",
+  "description": "AI-to-AI debate system",
+  "private": true,
+  "scripts": {
+    "typecheck": "pyright",
+    "typecheck:watch": "pyright --watch"
+  },
+  "devDependencies": {
+    "pyright": "^1.1.407"
+  }
+}

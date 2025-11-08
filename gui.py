@@ -1,6 +1,9 @@
-# new_gui.py    
+# new_gui.py
 
+import os
 import json
+import requests
+import threading
 import math
 import os
 import random
