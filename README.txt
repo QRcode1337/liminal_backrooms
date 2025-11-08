@@ -15,6 +15,7 @@ Huge thanks to Andy Ayrey and Janus for their endless inspiration.
     - Gemini (Google)
     - Anything on openrouter - if it's not listed add in config.
   - OpenAI Images (gpt-image-1) for image generation (toggle in GUI)
+  - OpenAI Sora 2 video generation (selectable as AI-2; videos saved to `videos/`)
 
 - Dynamic Conversation Branching:
   - 🕳️ Rabbithole: Explore concepts in depth while retaining full context
@@ -58,8 +59,10 @@ You'll need API keys from the following services to use all features:
    - Sign up at: https://replicate.com/
    - Used for DeepSeek R1 text generation; Flux image generation optional
 
-4. OpenAI Images (required for auto-image generation):
-   - Requires OPENAI_API_KEY for the gpt-image-1 model
+4. OpenAI (Images and Sora video):
+   - Requires `OPENAI_API_KEY`
+   - Used for both Images (`gpt-image-1`) and Sora 2/Pro video generation
+   - Optional: `OPENAI_BASE_URL` (defaults to `https://api.openai.com/v1`)
 
 ## Installation
 
@@ -131,6 +134,28 @@ poetry run python main.py
    - Chain of Thought: DeepSeek models show reasoning process
    - Image Generation: OpenAI Images (gpt-image-1) creates images from prompts
    - Export: Saves conversations and images with timestamps
+
+### Using Sora 2 (Video Generation)
+
+1. In `AI Model Selection`, set `AI-1` to an LLM and `AI-2` to `Sora 2` (or `Sora 2 Pro`).
+2. In `Prompt Style`, choose `Video Collaboration (AI-1 to Sora)`.
+   - `AI_2` prompt is intentionally blank (Sora does not use system prompts).
+3. Start the session. On each AI-2 turn, Sora renders a video from the AI-1 prompt.
+4. Output files are saved under `videos/` with timestamped filenames. The UI will print a line like:
+   - `[Sora] Video created: videos/2025...mp4`
+5. Note: Videos are not parsed back into context (yet); the next turn continues from text only.
+
+Environment variables (optional):
+```env
+SORA_SECONDS=12        # clip duration (e.g., 4, 8, 10, 12)
+SORA_SIZE=1280x720     # resolution hint (e.g., 1280x720)
+OPENAI_BASE_URL=...    # override API base, if needed
+```
+For the auto-trigger mode (not required when using Sora as AI-2), you can also enable generating a Sora video after AI-1 responses:
+```env
+SORA_AUTO_FROM_AI1=1
+```
+This will run Sora in the background and save videos to `videos/` without using the GUI embedding.
 
 ## Troubleshooting
 

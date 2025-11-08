@@ -152,11 +152,6 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
@@ -176,11 +171,4 @@ memory/ai-2/*
 *.bkp
 logs/*
 !logs/.gitkeep
-.clinerules/byterover-rules.md
-.kilocode/rules/byterover-rules.md
-.roo/rules/byterover-rules.md
-.windsurf/rules/byterover-rules.md
-.cursor/rules/byterover-rules.mdc
-.kiro/steering/byterover-rules.md
-.qoder/rules/byterover-rules.md
-.augment/rules/byterover-rules.md
+videos/*
