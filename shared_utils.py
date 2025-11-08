@@ -15,7 +15,7 @@ import base64
 from together import Together
 from openai import OpenAI
 import re
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any
 try:
     from bs4 import BeautifulSoup
 except ImportError:
