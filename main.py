@@ -1582,40 +1582,29 @@ class ConversationManager:
         """Show an introduction to the Living Document mode"""
         return
 
-class LiminalBackroomsManager:
-    """Main manager class for the Liminal Backrooms application"""
-    
-    def __init__(self):
-        """Initialize the manager"""
-        # Create the GUI
-        self.app = create_gui()
-        
-        # Initialize the worker thread pool
-        self.thread_pool = QThreadPool()
-        print(f"Multithreading with maximum {self.thread_pool.maxThreadCount()} threads")
-        
-        # List to store workers
-        self.workers = []
-        
-        # Initialize the application
-        self.initialize()
-
 def create_gui():
     """Create the GUI application"""
+    print("Creating QApplication...")
     app = QApplication(sys.argv)
+
+    print("Creating main window...")
     main_window = LiminalBackroomsApp()
-    
-    # Create conversation manager
+
+    print("Creating conversation manager...")
     manager = ConversationManager(main_window)
     manager.initialize()
-    
-    return main_window, app
+
+    print("GUI created successfully!")
+    return main_window, app, manager
 
 def run_gui(main_window, app):
     """Run the GUI application"""
+    print("Showing main window...")
     main_window.show()
+    print("Starting event loop...")
     sys.exit(app.exec())
 
 if __name__ == "__main__":
-    main_window, app = create_gui()
+    print("Starting Liminal Backrooms...")
+    main_window, app, manager = create_gui()
     run_gui(main_window, app)
