@@ -180,3 +180,4 @@ videos/*
 .kiro/steering/byterover-rules.md
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
+cline_mcp_settings.json
