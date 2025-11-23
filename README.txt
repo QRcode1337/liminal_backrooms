@@ -14,7 +14,7 @@ Huge thanks to Andy Ayrey and Janus for their endless inspiration.
     - LLaMA (Meta)
     - Gemini (Google)
     - Anything on openrouter - if it's not listed add in config.
-  - OpenAI Images (gpt-image-1) for image generation (toggle in GUI)
+  - Google Gemini 3 Pro Image Preview (via OpenRouter) for image generation (toggle in GUI)
   - OpenAI Sora 2 video generation (selectable as AI-2; videos saved to `videos/`)
 
 - Dynamic Conversation Branching:
@@ -59,10 +59,11 @@ You'll need API keys from the following services to use all features:
    - Sign up at: https://replicate.com/
    - Used for DeepSeek R1 text generation; Flux image generation optional
 
-4. OpenAI (Images and Sora video):
+4. OpenAI (Sora video):
    - Requires `OPENAI_API_KEY`
-   - Used for both Images (`gpt-image-1`) and Sora 2/Pro video generation
+   - Used for Sora 2/Pro video generation
    - Optional: `OPENAI_BASE_URL` (defaults to `https://api.openai.com/v1`)
+   - Note: Image generation now uses Google Gemini via OpenRouter (no separate API key needed)
 
 ## Installation
 
@@ -92,7 +93,7 @@ poetry install
    ANTHROPIC_API_KEY=your_anthropic_api_key
    OPENROUTER_API_KEY=your_openrouter_api_key
    REPLICATE_API_TOKEN=your_replicate_token (not required)
-   OPENAI_API_KEY=your_openai_api_key  # For image generation (gpt-image-1)
+   OPENAI_API_KEY=your_openai_api_key  # For Sora video generation (optional)
    ```
 
 2. Application Configuration (`config.py`):
@@ -132,7 +133,7 @@ poetry run python main.py
 
 4. Special Features:
    - Chain of Thought: DeepSeek models show reasoning process
-   - Image Generation: OpenAI Images (gpt-image-1) creates images from prompts
+   - Image Generation: Google Gemini 3 Pro Image Preview creates images from prompts (via OpenRouter)
    - Export: Saves conversations and images with timestamps
 
 ### Using Sora 2 (Video Generation)

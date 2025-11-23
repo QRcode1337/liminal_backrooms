@@ -31,7 +31,7 @@ from shared_utils import (
     generate_image_from_text,
     generate_video_with_sora
 )
-from gui import LiminalBackroomsApp
+from gui import LiminalBackroomsApp, load_fonts
 
 def is_image_message(message: dict) -> bool:
     """Returns True if 'message' contains a base64 image in its 'content' list."""
@@ -51,6 +51,7 @@ class WorkerSignals(QObject):
     response = pyqtSignal(str, str)
     result = pyqtSignal(str, object)  # Signal for complete result object
     progress = pyqtSignal(str)
+    streaming_chunk = pyqtSignal(str, str)  # Signal for streaming tokens: (ai_name, chunk)
 
 class Worker(QRunnable):
     """Worker thread for processing AI turns using QThreadPool"""
@@ -75,13 +76,18 @@ class Worker(QRunnable):
             # Emit progress update
             self.signals.progress.emit(f"Processing {self.ai_name} turn with {self.model}...")
             
-            # Process the turn
+            # Define streaming callback
+            def stream_chunk(chunk: str):
+                self.signals.streaming_chunk.emit(self.ai_name, chunk)
+            
+            # Process the turn with streaming
             result = ai_turn(
                 self.ai_name,
                 self.conversation,
                 self.model,
                 self.system_prompt,
-                gui=self.gui
+                gui=self.gui,
+                streaming_callback=stream_chunk
             )
             
             # Emit both the text response and the full result object
@@ -105,8 +111,12 @@ class Worker(QRunnable):
             # Still emit finished signal even if there's an error
             self.signals.finished.emit()
 
-def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None):
-    """Execute an AI turn with the given parameters"""
+def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None, streaming_callback=None):
+    """Execute an AI turn with the given parameters
+    
+    Args:
+        streaming_callback: Optional function(chunk: str) to call with each streaming token
+    """
     print(f"==================================================")
     print(f"Starting {model} turn ({ai_name})...")
     print(f"Current conversation length: {len(conversation)}")
@@ -116,6 +126,9 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     
     # Get the actual model ID from the display name
     model_id = AI_MODELS.get(model, model)
+    
+    # Prepend model identity to system prompt so AI knows who it is
+    enhanced_system_prompt = f"You are {ai_name} ({model}).\n\n{enhanced_system_prompt}"
     
     # Check for branch type and count AI responses
     is_rabbithole = False
@@ -242,17 +255,52 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         # Get content - preserve structure for images
         content = msg.get("content", "")
         
+        # Inject speaker name for messages from other participants (not from current AI)
+        if not is_from_this_ai and content:
+            # Use the model name (e.g., "Claude 4.5 Sonnet") if available, otherwise fall back to ai_name or "User"
+            speaker_name = msg.get("model") or msg.get("ai_name", "User")
+            
+            # Handle different content types
+            if isinstance(content, str):
+                # Simple string content - prefix with speaker name
+                content = f"[{speaker_name}]: {content}"
+            elif isinstance(content, list):
+                # Structured content (e.g., with images) - prefix text parts
+                modified_content = []
+                for part in content:
+                    if part.get('type') == 'text':
+                        # Prefix the first text part with speaker name
+                        text = part.get('text', '')
+                        modified_part = part.copy()
+                        modified_part['text'] = f"[{speaker_name}]: {text}"
+                        modified_content.append(modified_part)
+                        # Only prefix the first text part
+                        break
+                    else:
+                        modified_content.append(part)
+                
+                # Add remaining parts unchanged
+                first_text_found = False
+                for part in content:
+                    if part.get('type') == 'text' and not first_text_found:
+                        first_text_found = True
+                        continue  # Skip, already added above
+                    modified_content.append(part)
+                
+                content = modified_content if modified_content else content
+        
         # Add to messages
         messages.append({
             "role": role,
-            "content": content  # This now correctly handles both string and list (image) content
+            "content": content  # Now includes speaker names for non-current-AI messages
         })
         
         # For logging, handle both string and structured content
         if isinstance(content, list):
             print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role} - Content: [structured message with {len(content)} parts]")
         else:
-            print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role}")
+            content_preview = content[:50] + "..." if len(str(content)) > 50 else content
+            print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role} - Preview: {content_preview}")
     
     # Ensure the last message is a user message so the AI responds
     if len(messages) > 1 and messages[-1].get("role") == "assistant":
@@ -448,8 +496,8 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 context_messages = []
                 prompt_content = "Connecting..."  # Default fallback
             
-            # Call Claude API with filtered messages
-            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt)
+            # Call Claude API with filtered messages (with streaming if callback provided)
+            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
             
             return {
                 "role": "assistant",
@@ -505,68 +553,30 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             print(f"Using OpenRouter API for model: {model_id}")
             
             try:
-                # Set up the API request
-                url = "https://openrouter.ai/api/v1/chat/completions"
-                headers = {
-                    "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-                    "Content-Type": "application/json"
-                }
-                
                 # Ensure we have valid messages
-                if not messages:
-                    messages = [{"role": "system", "content": system_prompt},
-                               {"role": "user", "content": "Connecting..."}]
+                if len(messages) > 0:
+                    prompt_content = messages[-1].get("content", "")
+                    context_messages = messages[:-1]
+                else:
+                    prompt_content = "Connecting..."
+                    context_messages = []
                 
-                data = {
-                    "model": model_id,
-                    "messages": messages
+                # Call OpenRouter API with streaming support
+                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
+                
+                print(f"Raw {model} Response:")
+                print("-" * 50)
+                print(response)
+                print("-" * 50)
+                
+                result = {
+                    "role": "assistant",
+                    "content": response,
+                    "model": model,
+                    "ai_name": ai_name
                 }
                 
-                # Make the API request
-                print(f"Calling OpenRouter API with model {model_id}...")
-                response = requests.post(url, headers=headers, json=data)
-                
-                # Check for successful response
-                print(f"Response status: {response.status_code}")
-                print(f"Response headers: {response.headers}")
-                
-                if response.status_code == 200:
-                    response_data = response.json()
-                    print(f"Response data: {json.dumps(response_data, indent=2)}")
-                    
-                    # Make sure we have choices
-                    if not response_data.get("choices"):
-                        raise ValueError("No choices found in response")
-                    
-                    # Extract the response content
-                    content = response_data["choices"][0]["message"]["content"]
-                    print(f"Raw {model} Response:")
-                    print("-" * 50)
-                    print(content)
-                    print("-" * 50)
-                    
-                    result = {
-                        "role": "assistant",
-                        "content": content,
-                        "model": model,
-                        "ai_name": ai_name
-                    }
-                    
-                    return result
-                else:
-                    error_message = f"API request failed with status code {response.status_code}: {response.text}"
-                    print(f"Error: {error_message}")
-                    
-                    # Create an error response
-                    result = {
-                        "role": "system",
-                        "content": f"Error: {error_message}",
-                        "model": model,
-                        "ai_name": ai_name
-                    }
-                    
-                    # Return the error result
-                    return result
+                return result
             except Exception as e:
                 error_message = f"Error making API request: {str(e)}"
                 print(f"Error: {error_message}")
@@ -699,6 +709,7 @@ class ConversationManager:
         # Get selected models from UI
         ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
         ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
         
         # Get selected prompt pair
         selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
@@ -706,6 +717,7 @@ class ConversationManager:
         # Get system prompts from the selected pair
         ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
         ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
+        ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -718,20 +730,31 @@ class ConversationManager:
         else:
             print(f"MAIN: Continuing conversation - turn {self.app.turn_count+1} of {max_iterations}")
         
-        # Create worker threads for AI-1 and AI-2
+        # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", self.app.main_conversation, ai_1_model, ai_1_prompt, gui=self.app)
         worker2 = Worker("AI-2", self.app.main_conversation, ai_2_model, ai_2_prompt, gui=self.app)
+        worker3 = Worker("AI-3", self.app.main_conversation, ai_3_model, ai_3_prompt, gui=self.app)
         
-        # Connect signals
+        # Connect signals for worker1
         worker1.signals.response.connect(self.on_ai_response_received)
-        worker1.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
+        worker1.signals.result.connect(self.on_ai_result_received)
+        worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
         worker1.signals.finished.connect(lambda: self.start_ai2_turn(self.app.main_conversation, worker2))
         worker1.signals.error.connect(self.on_ai_error)
         
+        # Connect signals for worker2
         worker2.signals.response.connect(self.on_ai_response_received)
-        worker2.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
-        worker2.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker2.signals.result.connect(self.on_ai_result_received)
+        worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker2.signals.finished.connect(lambda: self.start_ai3_turn(self.app.main_conversation, worker3))
         worker2.signals.error.connect(self.on_ai_error)
+        
+        # Connect signals for worker3
+        worker3.signals.response.connect(self.on_ai_response_received)
+        worker3.signals.result.connect(self.on_ai_result_received)
+        worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker3.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker3.signals.error.connect(self.on_ai_error)
         
         # Start AI-1's turn
         self.thread_pool.start(worker1)
@@ -757,6 +780,28 @@ class ConversationManager:
         
         # Start AI-2's turn - the ai_turn function will properly format the context
         self.thread_pool.start(worker2)
+    
+    def start_ai3_turn(self, conversation, worker3):
+        """Start AI-3's turn in the main conversation"""
+        # Make sure conversation is up to date with AI-2's response
+        if self.app.active_branch:
+            # Get the latest branch conversation with AI-2's response already included
+            branch_id = self.app.active_branch
+            branch_data = self.app.branch_conversations[branch_id]
+            latest_conversation = branch_data['conversation']
+        else:
+            # Get the latest main conversation with AI-2's response already included
+            latest_conversation = self.app.main_conversation
+        
+        # Update worker's conversation reference to ensure it has the latest state
+        # This ensures any images generated from AI-2's response are included
+        worker3.conversation = latest_conversation.copy()
+        
+        # Add a small delay between turns
+        time.sleep(TURN_DELAY)
+        
+        # Start AI-3's turn - the ai_turn function will properly format the context
+        self.thread_pool.start(worker3)
     
     def handle_turn_completion(self, max_iterations=1):
         """Handle the completion of a full turn (both AIs)"""
@@ -896,6 +941,7 @@ class ConversationManager:
         # Get selected models and prompt pair from UI
         ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
         ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
         selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
@@ -910,14 +956,16 @@ class ConversationManager:
         if branch_type.lower() == 'rabbithole' and ai_response_count < 2:
             # Initial rabbitholing prompt - only for the first exchange
             print("Using rabbithole-specific prompt for initial exploration")
-            rabbithole_prompt = f"You are interacting with another AI. IMPORTANT: Focus this response specifically on exploring and expanding upon the concept of '{selected_text}' in depth. Discuss the most interesting aspects or connections related to this concept while maintaining the tone of the conversation. No numbered lists or headings."
+            rabbithole_prompt = f"You are interacting with other AIs. IMPORTANT: Focus this response specifically on exploring and expanding upon the concept of '{selected_text}' in depth. Discuss the most interesting aspects or connections related to this concept while maintaining the tone of the conversation. No numbered lists or headings."
             ai_1_prompt = rabbithole_prompt
             ai_2_prompt = rabbithole_prompt
+            ai_3_prompt = rabbithole_prompt
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
             ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
             ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
+            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -931,27 +979,61 @@ class ConversationManager:
         # Get max iterations
         max_iterations = int(self.app.left_pane.control_panel.iterations_selector.currentText())
         
-        # Create worker threads for AI-1 and AI-2
+        # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         
-        # Connect signals
+        # Connect signals for worker1
         worker1.signals.response.connect(self.on_ai_response_received)
-        worker1.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
+        worker1.signals.result.connect(self.on_ai_result_received)
+        worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
         worker1.signals.finished.connect(lambda: self.start_ai2_turn(conversation, worker2))
         worker1.signals.error.connect(self.on_ai_error)
         
+        # Connect signals for worker2
         worker2.signals.response.connect(self.on_ai_response_received)
-        worker2.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
-        worker2.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker2.signals.result.connect(self.on_ai_result_received)
+        worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker2.signals.finished.connect(lambda: self.start_ai3_turn(conversation, worker3))
         worker2.signals.error.connect(self.on_ai_error)
+        
+        # Connect signals for worker3
+        worker3.signals.response.connect(self.on_ai_response_received)
+        worker3.signals.result.connect(self.on_ai_result_received)
+        worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker3.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker3.signals.error.connect(self.on_ai_error)
         
         # Start AI-1's turn
         self.thread_pool.start(worker1)
         
+    def on_streaming_chunk(self, ai_name, chunk):
+        """Handle streaming chunks as they arrive"""
+        # Initialize streaming buffer if not exists
+        if not hasattr(self, '_streaming_buffers'):
+            self._streaming_buffers = {}
+        
+        # Initialize buffer for this AI if needed
+        if ai_name not in self._streaming_buffers:
+            self._streaming_buffers[ai_name] = ""
+            # Add a header to show this AI is responding
+            model_name = self.get_model_for_ai(ai_name)
+            self.app.left_pane.append_text(f"\n{ai_name} ({model_name}):\n\n", "header")
+        
+        # Append chunk to buffer
+        self._streaming_buffers[ai_name] += chunk
+        
+        # Display the chunk in the GUI
+        self.app.left_pane.append_text(chunk, "ai")
+    
     def on_ai_response_received(self, ai_name, response_content):
         """Handle AI responses for both main and branch conversations"""
         print(f"Response received from {ai_name}: {response_content[:100]}...")
+        
+        # Clear streaming buffer for this AI
+        if hasattr(self, '_streaming_buffers') and ai_name in self._streaming_buffers:
+            del self._streaming_buffers[ai_name]
         
         # Format the AI response with proper metadata
         ai_message = {
@@ -1084,7 +1166,7 @@ class ConversationManager:
         prompt = text[:max_length].strip()
         
         # Add artistic direction to the prompt using the user's requested format
-        enhanced_prompt = f"Create an image using the following text as inspiration. DO NOT repeat text in the image. Create something new. {prompt}"
+        enhanced_prompt = f"Create an image using the following text as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form. HIghly detailed{prompt}"
         
         # Generate the image
         result = generate_image_from_text(enhanced_prompt)
@@ -1115,7 +1197,12 @@ class ConversationManager:
             self.app.left_pane.display_image(image_path)
             
             # Notify the user
-            self.app.left_pane.append_text(f"\nGenerated image saved to {image_path}\n", "system")
+            self.app.left_pane.append_text(f"\n✓ Generated image saved to {image_path}\n", "system")
+        else:
+            # Notify the user of the failure
+            error_msg = result.get("error", "Unknown error")
+            print(f"Image generation failed: {error_msg}")
+            self.app.left_pane.append_text(f"\n✗ Image generation failed: {error_msg}\n", "system")
             
             # Do not automatically open the HTML view
             # open_html_in_browser("conversation_full.html")
@@ -1126,6 +1213,8 @@ class ConversationManager:
             return self.app.left_pane.control_panel.ai1_model_selector.currentText()
         elif ai_name == "AI-2":
             return self.app.left_pane.control_panel.ai2_model_selector.currentText()
+        elif ai_name == "AI-3":
+            return self.app.left_pane.control_panel.ai3_model_selector.currentText()
         return ""
     
     def on_ai_error(self, error_message):
@@ -1360,6 +1449,7 @@ class ConversationManager:
         # Get selected models and prompt pair from UI
         ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
         ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
         selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
@@ -1380,11 +1470,13 @@ class ConversationManager:
             rabbithole_prompt = f"'{selected_text}'!!!"
             ai_1_prompt = rabbithole_prompt
             ai_2_prompt = rabbithole_prompt
+            ai_3_prompt = rabbithole_prompt
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
             ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
             ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
+            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -1398,20 +1490,31 @@ class ConversationManager:
         # Get max iterations
         max_iterations = int(self.app.left_pane.control_panel.iterations_selector.currentText())
         
-        # Create worker threads for AI-1 and AI-2
+        # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         worker2 = Worker("AI-2", conversation, ai_2_model, ai_2_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
+        worker3 = Worker("AI-3", conversation, ai_3_model, ai_3_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
         
-        # Connect signals
+        # Connect signals for worker1
         worker1.signals.response.connect(self.on_ai_response_received)
-        worker1.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
+        worker1.signals.result.connect(self.on_ai_result_received)
+        worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
         worker1.signals.finished.connect(lambda: self.start_ai2_turn(conversation, worker2))
         worker1.signals.error.connect(self.on_ai_error)
         
+        # Connect signals for worker2
         worker2.signals.response.connect(self.on_ai_response_received)
-        worker2.signals.result.connect(self.on_ai_result_received)  # Connect to complete result signal
-        worker2.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker2.signals.result.connect(self.on_ai_result_received)
+        worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker2.signals.finished.connect(lambda: self.start_ai3_turn(conversation, worker3))
         worker2.signals.error.connect(self.on_ai_error)
+        
+        # Connect signals for worker3
+        worker3.signals.response.connect(self.on_ai_response_received)
+        worker3.signals.result.connect(self.on_ai_result_received)
+        worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
+        worker3.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+        worker3.signals.error.connect(self.on_ai_error)
         
         # Start AI-1's turn
         self.thread_pool.start(worker1)
@@ -1758,6 +1861,14 @@ class LiminalBackroomsManager:
 def create_gui():
     """Create the GUI application"""
     app = QApplication(sys.argv)
+    
+    # Load custom fonts (Iosevka Term for better ASCII art rendering)
+    loaded_fonts = load_fonts()
+    if loaded_fonts:
+        print(f"Successfully loaded custom fonts: {', '.join(loaded_fonts)}")
+    else:
+        print("No custom fonts loaded - using system fonts")
+    
     main_window = LiminalBackroomsApp()
     
     # Create conversation manager

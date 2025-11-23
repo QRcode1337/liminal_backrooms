@@ -62,8 +62,9 @@ def load_fonts():
     
     # List of fonts to load - these would need to be included with the application
     fonts = [
-        # ("JetBrainsMono-Regular.ttf", "JetBrains Mono"),
-        # ("Orbitron-Regular.ttf", "Orbitron"),
+        ("IosevkaTerm-Regular.ttf", "Iosevka Term"),
+        ("IosevkaTerm-Bold.ttf", "Iosevka Term"),
+        ("IosevkaTerm-Italic.ttf", "Iosevka Term"),
     ]
     
     loaded_fonts = []
@@ -72,7 +73,13 @@ def load_fonts():
         if font_path.exists():
             font_id = QFontDatabase.addApplicationFont(str(font_path))
             if font_id >= 0:
-                loaded_fonts.append(font_name)
+                if font_name not in loaded_fonts:
+                    loaded_fonts.append(font_name)
+                print(f"Loaded font: {font_name} from {font_file}")
+            else:
+                print(f"Failed to load font: {font_file}")
+        else:
+            print(f"Font file not found: {font_path}")
     
     return loaded_fonts
 
@@ -913,6 +920,22 @@ class ControlPanel(QWidget):
         
         middle_column.addWidget(ai2_container)
         
+        # AI-3 Model selection
+        ai3_container = QWidget()
+        ai3_layout = QVBoxLayout(ai3_container)
+        ai3_layout.setContentsMargins(0, 0, 0, 0)
+        ai3_layout.setSpacing(5)
+        
+        ai3_label = QLabel("AI-3 Model")
+        ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        ai3_layout.addWidget(ai3_label)
+        
+        self.ai3_model_selector = QComboBox()
+        self.ai3_model_selector.setStyleSheet(self.get_combobox_style())
+        ai3_layout.addWidget(self.ai3_model_selector)
+        
+        middle_column.addWidget(ai3_container)
+        
         # Right column - Prompt pair and export
         right_column = QVBoxLayout()
         right_column.setSpacing(10)
@@ -962,7 +985,7 @@ class ControlPanel(QWidget):
                 border: 1px solid {COLORS['accent_blue']};
             }}
         """)
-        self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using OpenAI's GPT-image-1 model")
+        self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
         action_layout.addWidget(self.auto_image_checkbox)
         
         # Removed: HTML contributions checkbox
@@ -1098,8 +1121,10 @@ class ControlPanel(QWidget):
         # Add AI models
         self.ai1_model_selector.clear()
         self.ai2_model_selector.clear()
+        self.ai3_model_selector.clear()
         self.ai1_model_selector.addItems(list(AI_MODELS.keys()))
         self.ai2_model_selector.addItems(list(AI_MODELS.keys()))
+        self.ai3_model_selector.addItems(list(AI_MODELS.keys()))
         
         # Add prompt pairs
         self.prompt_pair_selector.clear()
@@ -1249,8 +1274,10 @@ class ConversationPane(QWidget):
         self.conversation_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.conversation_display.customContextMenuRequested.connect(self.show_context_menu)
         
-        # Set font for conversation display
-        font = QFont("Segoe UI", 10)
+        # Set font for conversation display - use Iosevka Term for better ASCII art rendering
+        font = QFont("Iosevka Term", 10)
+        # Set fallbacks in case Iosevka Term isn't loaded
+        font.setStyleHint(QFont.StyleHint.Monospace)
         self.conversation_display.setFont(font)
         
         # Apply modern styling
@@ -1535,12 +1562,16 @@ class ConversationPane(QWidget):
     
     def render_conversation(self):
         """Render conversation in the display"""
+        # Check if user is at the bottom before re-rendering
+        scrollbar = self.conversation_display.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 20
+        
         # Clear display
         self.conversation_display.clear()
         
         # Create HTML for conversation with modern styling
         html = "<style>"
-        html += f"body {{ font-family: 'Segoe UI', sans-serif; font-size: 10pt; line-height: 1.4; }}"
+        html += f"body {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; font-size: 10pt; line-height: 1.4; }}"
         html += f".message {{ margin-bottom: 10px; padding: 8px; border-radius: 4px; }}"
         html += f".user {{ background-color: {COLORS['bg_medium']}; }}"
         html += f".assistant {{ background-color: {COLORS['bg_medium']}; }}"
@@ -1552,7 +1583,7 @@ class ConversationPane(QWidget):
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
         # Removed HTML contribution styling
         html += f"pre {{ background-color: {COLORS['bg_dark']}; border: 1px solid {COLORS['border']}; border-radius: 3px; padding: 8px; overflow-x: auto; margin: 8px 0; }}"
-        html += f"code {{ font-family: 'Consolas', 'Courier New', monospace; color: {COLORS['text_bright']}; }}"
+        html += f"code {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; color: {COLORS['text_bright']}; }}"
         html += "</style>"
         
         for i, message in enumerate(self.conversation):
@@ -1635,10 +1666,11 @@ class ConversationPane(QWidget):
         # Set HTML in display
         self.conversation_display.setHtml(html)
         
-        # Scroll to bottom
-        self.conversation_display.verticalScrollBar().setValue(
-            self.conversation_display.verticalScrollBar().maximum()
-        )
+        # Only auto-scroll if user was already at the bottom
+        if was_at_bottom:
+            self.conversation_display.verticalScrollBar().setValue(
+                self.conversation_display.verticalScrollBar().maximum()
+            )
     
     def process_content_with_code_blocks(self, content):
         """Process content to properly format code blocks"""
@@ -1800,6 +1832,10 @@ class ConversationPane(QWidget):
     
     def append_text(self, text, format_type="normal"):
         """Append text to the conversation display with the specified format"""
+        # Check if user is at the bottom before appending (within 20 pixels is considered "at bottom")
+        scrollbar = self.conversation_display.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 20
+        
         cursor = self.conversation_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         
@@ -1814,9 +1850,10 @@ class ConversationPane(QWidget):
         if format_type != "normal":
             self.conversation_display.setCurrentCharFormat(self.text_formats["normal"])
         
-        # Scroll to bottom
-        self.conversation_display.setTextCursor(cursor)
-        self.conversation_display.ensureCursorVisible()
+        # Only auto-scroll if user was already at the bottom
+        if was_at_bottom:
+            self.conversation_display.setTextCursor(cursor)
+            self.conversation_display.ensureCursorVisible()
     
     def clear_conversation(self):
         """Clear the conversation display"""

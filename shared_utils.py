@@ -29,8 +29,12 @@ anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-def call_claude_api(prompt, messages, model_id, system_prompt=None):
-    """Call the Claude API with the given messages and prompt"""
+def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callback=None):
+    """Call the Claude API with the given messages and prompt
+    
+    Args:
+        stream_callback: Optional function(chunk: str) to call with each streaming token
+    """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return "Error: ANTHROPIC_API_KEY not found in environment variables"
@@ -41,7 +45,8 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None):
     payload = {
         "model": model_id,
         "max_tokens": 4000,
-        "temperature": 1        
+        "temperature": 1,
+        "stream": stream_callback is not None  # Enable streaming if callback provided
     }
     
     # Set system if provided
@@ -99,16 +104,51 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None):
     }
     
     try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        if 'content' in data and len(data['content']) > 0:
-            for content_item in data['content']:
-                if content_item.get('type') == 'text':
-                    return content_item.get('text', '')
-            # Fallback if no text type content is found
-            return str(data['content'])
-        return "No content in response"
+        if stream_callback:
+            # Streaming mode using REST API directly
+            payload["stream"] = True
+            full_response = ""
+            
+            response = requests.post(url, json=payload, headers=headers, stream=True)
+            
+            if response.status_code == 200:
+                for line in response.iter_lines():
+                    if line:
+                        line_text = line.decode('utf-8')
+                        if line_text.startswith('data: '):
+                            json_str = line_text[6:]  # Remove 'data: ' prefix
+                            # Skip if this is a ping or message_stop event
+                            if json_str.strip() in ['[DONE]', '']:
+                                continue
+                            try:
+                                chunk_data = json.loads(json_str)
+                                # Handle different event types from Claude's SSE stream
+                                event_type = chunk_data.get('type')
+                                
+                                if event_type == 'content_block_delta':
+                                    delta = chunk_data.get('delta', {})
+                                    if delta.get('type') == 'text_delta':
+                                        text = delta.get('text', '')
+                                        if text:
+                                            full_response += text
+                                            stream_callback(text)
+                            except json.JSONDecodeError:
+                                continue
+                return full_response
+            else:
+                return f"Error: API returned status {response.status_code}: {response.text}"
+        else:
+            # Non-streaming mode (original behavior)
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if 'content' in data and len(data['content']) > 0:
+                for content_item in data['content']:
+                    if content_item.get('type') == 'text':
+                        return content_item.get('text', '')
+                # Fallback if no text type content is found
+                return str(data['content'])
+            return "No content in response"
     except Exception as e:
         return f"Error calling Claude API: {str(e)}"
 
@@ -186,8 +226,12 @@ def call_openai_api(prompt, conversation_history, model, system_prompt):
         print(f"Error calling OpenAI API: {e}")
         return None
 
-def call_openrouter_api(prompt, conversation_history, model, system_prompt):
-    """Call the OpenRouter API to access various LLM models."""
+def call_openrouter_api(prompt, conversation_history, model, system_prompt, stream_callback=None):
+    """Call the OpenRouter API to access various LLM models.
+    
+    Args:
+        stream_callback: Optional function(chunk: str) to call with each streaming token
+    """
     try:
         headers = {
             "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
@@ -215,45 +259,83 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt):
             "messages": messages,
             "temperature": 1,
             "max_tokens": 4000,
-            "stream": False
+            "stream": stream_callback is not None  # Enable streaming if callback provided
         }
         
         print(f"\nSending to OpenRouter:")
         print(f"Model: {model}")
         print(f"Messages: {json.dumps(messages, indent=2)}")
         
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=60  # Add timeout
-        )
-        
-        print(f"Response status: {response.status_code}")
-        print(f"Response headers: {response.headers}")
-        
-        if response.status_code == 200:
-            response_data = response.json()
-            print(f"Response data: {json.dumps(response_data, indent=2)}")
+        if stream_callback:
+            # Streaming mode
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=180,
+                stream=True
+            )
             
-            if 'choices' in response_data and len(response_data['choices']) > 0:
-                message = response_data['choices'][0].get('message', {})
-                if message and 'content' in message:
-                    return message['content']
+            print(f"Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                full_response = ""
+                for line in response.iter_lines():
+                    if line:
+                        line_text = line.decode('utf-8')
+                        if line_text.startswith('data: '):
+                            json_str = line_text[6:]  # Remove 'data: ' prefix
+                            if json_str.strip() == '[DONE]':
+                                break
+                            try:
+                                chunk_data = json.loads(json_str)
+                                if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                    delta = chunk_data['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        full_response += content
+                                        stream_callback(content)
+                            except json.JSONDecodeError:
+                                continue
+                return full_response
+            else:
+                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
+                print(error_msg)
+                return f"Error: {error_msg}"
+        else:
+            # Non-streaming mode (original behavior)
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60  # Add timeout
+            )
+            
+            print(f"Response status: {response.status_code}")
+            print(f"Response headers: {response.headers}")
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                print(f"Response data: {json.dumps(response_data, indent=2)}")
+                
+                if 'choices' in response_data and len(response_data['choices']) > 0:
+                    message = response_data['choices'][0].get('message', {})
+                    if message and 'content' in message:
+                        return message['content']
+                    else:
+                        print(f"Unexpected message structure: {message}")
+                        return None
                 else:
-                    print(f"Unexpected message structure: {message}")
+                    print(f"Unexpected response structure: {response_data}")
                     return None
             else:
-                print(f"Unexpected response structure: {response_data}")
-                return None
-        else:
-            error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
-            print(error_msg)
-            if response.status_code == 404:
-                print("Model not found. Please check if the model name is correct.")
-            elif response.status_code == 401:
-                print("Authentication error. Please check your API key.")
-            return f"Error: {error_msg}"
+                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
+                print(error_msg)
+                if response.status_code == 404:
+                    print("Model not found. Please check if the model name is correct.")
+                elif response.status_code == 401:
+                    print("Authentication error. Please check your API key.")
+                return f"Error: {error_msg}"
             
     except requests.exceptions.Timeout:
         print("Request timed out. The server took too long to respond.")
@@ -625,8 +707,8 @@ def read_living_document(*args, **kwargs):
 def process_living_document_edits(result, model_name):
     return result
 
-def generate_image_from_text(text, model="gpt-image-1"):
-    """Generate an image based on text using OpenAI's image generation API"""
+def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
+    """Generate an image based on text using OpenRouter's image generation API"""
     try:
         # Create a directory for the images if it doesn't exist
         image_dir = Path("images")
@@ -635,29 +717,110 @@ def generate_image_from_text(text, model="gpt-image-1"):
         # Create a timestamp for the image filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Generate the image
-        result = openai_client.images.generate(
-            model=model,
-            prompt=text,
-            n=1,  # Generate 1 image
+        # Call OpenRouter API for image generation
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ],
+            "modalities": ["image", "text"]
+        }
+        
+        print(f"Generating image with {model}...")
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=60
         )
         
-        # Get the base64 encoded image
-        image_base64 = result.data[0].b64_json
-        image_bytes = base64.b64decode(image_base64)
-        
-        # Save the image to a file
-        image_path = image_dir / f"generated_{timestamp}.png"
-        with open(image_path, "wb") as f:
-            f.write(image_bytes)
-        
-        print(f"Generated image saved to {image_path}")
-        
-        return {
-            "success": True,
-            "image_path": str(image_path),
-            "timestamp": timestamp
-        }
+        if response.status_code == 200:
+            result = response.json()
+            
+            # The generated image will be in the assistant message
+            if result.get("choices"):
+                message = result["choices"][0].get("message", {})
+                
+                # Check for images in the message
+                if message.get("images"):
+                    for image in message["images"]:
+                        image_url = image["image_url"]["url"]  # Base64 data URL
+                        print(f"Generated image URL (first 50 chars): {image_url[:50]}...")
+                        
+                        # Handle base64 data URL
+                        if image_url.startswith('data:image'):
+                            try:
+                                # Extract base64 data after comma
+                                base64_data = image_url.split(',', 1)[1] if ',' in image_url else image_url
+                                
+                                # Decode base64 to image
+                                image_data = base64.b64decode(base64_data)
+                                image_path = image_dir / f"generated_{timestamp}.png"
+                                with open(image_path, "wb") as f:
+                                    f.write(image_data)
+                                
+                                print(f"Generated image saved to {image_path}")
+                                return {
+                                    "success": True,
+                                    "image_path": str(image_path),
+                                    "timestamp": timestamp
+                                }
+                            except Exception as e:
+                                print(f"Failed to decode base64 image: {e}")
+                                return {
+                                    "success": False,
+                                    "error": f"Failed to decode image: {e}"
+                                }
+                        else:
+                            # If it's a regular URL, download it
+                            try:
+                                img_response = requests.get(image_url, timeout=30)
+                                if img_response.status_code == 200:
+                                    image_path = image_dir / f"generated_{timestamp}.png"
+                                    with open(image_path, "wb") as f:
+                                        f.write(img_response.content)
+                                    
+                                    print(f"Generated image saved to {image_path}")
+                                    return {
+                                        "success": True,
+                                        "image_path": str(image_path),
+                                        "timestamp": timestamp
+                                    }
+                            except Exception as e:
+                                print(f"Failed to download image: {e}")
+                                return {
+                                    "success": False,
+                                    "error": f"Failed to download image: {e}"
+                                }
+                
+                # No images in response
+                print(f"No images in response. Message: {message}")
+                return {
+                    "success": False,
+                    "error": "No images in API response"
+                }
+            else:
+                print(f"No choices in response: {result}")
+                return {
+                    "success": False,
+                    "error": "No choices in API response"
+                }
+        else:
+            error_msg = f"API error {response.status_code}: {response.text[:500]}"
+            print(f"Error generating image: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg
+            }
+            
     except Exception as e:
         print(f"Error generating image: {e}")
         return {
