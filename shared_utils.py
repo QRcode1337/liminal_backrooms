@@ -58,20 +58,35 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None):
         if msg.get("role") == "system":
             continue
             
-        # Check for duplicates by content
+        # Get content - handle both string and list formats
         content = msg.get("content", "")
-        if content in seen_contents:
-            print(f"Skipping duplicate message in API call: {content[:30]}...")
+        
+        # For duplicate detection, use a hashable representation (always a string)
+        if isinstance(content, list):
+            # For image messages, create a hash based on text content only
+            text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
+            content_hash = ''.join(text_parts)
+        elif isinstance(content, str):
+            content_hash = content
+        else:
+            # For any other type, convert to string
+            content_hash = str(content) if content else ""
+            
+        # Check for duplicates
+        if content_hash and content_hash in seen_contents:
+            print(f"Skipping duplicate message in API call: {str(content_hash)[:30]}...")
             continue
             
-        seen_contents.add(content)
+        if content_hash:
+            seen_contents.add(content_hash)
         filtered_messages.append(msg)
     
-    # Add the current prompt as the final user message
-    filtered_messages.append({
-        "role": "user",
-        "content": prompt
-    })
+    # Add the current prompt as the final user message (if it's not already an image message)
+    if prompt and not any(isinstance(msg.get("content"), list) for msg in filtered_messages[-1:]):
+        filtered_messages.append({
+            "role": "user",
+            "content": prompt
+        })
 
     # Add filtered messages to payload
     payload["messages"] = filtered_messages

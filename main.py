@@ -132,14 +132,17 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             found_branch_marker = True
             
             # Determine branch type from the latest marker
-            if "Rabbitholing down:" in msg.get("content", ""):
-                is_rabbithole = True
-                branch_text = msg.get("content", "").split('"')[1] if '"' in msg.get("content", "") else ""
-                print(f"Detected rabbithole branch for: '{branch_text}'")
-            elif "Forking off:" in msg.get("content", ""):
-                is_fork = True
-                branch_text = msg.get("content", "").split('"')[1] if '"' in msg.get("content", "") else ""
-                print(f"Detected fork branch for: '{branch_text}'")
+            msg_content = msg.get("content", "")
+            # Branch indicators are always plain strings
+            if isinstance(msg_content, str):
+                if "Rabbitholing down:" in msg_content:
+                    is_rabbithole = True
+                    branch_text = msg_content.split('"')[1] if '"' in msg_content else ""
+                    print(f"Detected rabbithole branch for: '{branch_text}'")
+                elif "Forking off:" in msg_content:
+                    is_fork = True
+                    branch_text = msg_content.split('"')[1] if '"' in msg_content else ""
+                    print(f"Detected fork branch for: '{branch_text}'")
 
     # Now count AI responses that occur AFTER the latest branch marker
     ai_response_count = 0
@@ -187,12 +190,22 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             msg = {"role": "user", "content": str(msg)}
             
         # Skip any hidden "connecting..." messages
-        if msg.get("hidden") and "connect" in msg.get("content", "").lower():
+        msg_content = msg.get("content", "")
+        if msg.get("hidden") and isinstance(msg_content, str) and "connect" in msg_content.lower():
             continue
             
         # Skip empty messages
-        if not msg.get("content", "").strip():
-            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if not content.strip():
+                continue
+        elif isinstance(content, list):
+            # For structured content, skip if all parts are empty
+            if not any(part.get('text', '').strip() if part.get('type') == 'text' else True for part in content):
+                continue
+        else:
+            if not content:
+                continue
             
         # Skip system messages (we already added our own above)
         if msg.get("role") == "system":
@@ -226,13 +239,20 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         else:
             role = "user"
             
+        # Get content - preserve structure for images
+        content = msg.get("content", "")
+        
         # Add to messages
         messages.append({
             "role": role,
-            "content": msg.get("content", "")
+            "content": content  # This now correctly handles both string and list (image) content
         })
         
-        print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role}")
+        # For logging, handle both string and structured content
+        if isinstance(content, list):
+            print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role} - Content: [structured message with {len(content)} parts]")
+        else:
+            print(f"Message {i} - AI: {msg.get('ai_name', 'User')} - Assigned role: {role}")
     
     # Ensure the last message is a user message so the AI responds
     if len(messages) > 1 and messages[-1].get("role") == "assistant":
@@ -274,7 +294,20 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     print(f"Sending to {model} ({ai_name}):")
     for i, msg in enumerate(messages):
         role = msg.get("role", "unknown")
-        content = msg.get("content", "")[:50] + "..." if len(msg.get("content", "")) > 50 else msg.get("content", "")
+        content_raw = msg.get("content", "")
+        
+        # Handle both string and list content for logging
+        if isinstance(content_raw, list):
+            text_parts = [part.get('text', '') for part in content_raw if part.get('type') == 'text']
+            has_image = any(part.get('type') == 'image' for part in content_raw)
+            content_str = ' '.join(text_parts)
+            if has_image:
+                content_str = f"[Image] {content_str}" if content_str else "[Image]"
+        else:
+            content_str = str(content_raw)
+        
+        # Truncate for display
+        content = content_str[:50] + "..." if len(content_str) > 50 else content_str
         print(f"[{i}] {role}: {content}")
     
     # Load any available memories for this AI
@@ -304,8 +337,15 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             # Use last user message as the video prompt
             prompt_content = ""
             if len(messages) > 0:
-                prompt_content = messages[-1].get("content", "")
-            if not isinstance(prompt_content, str) or len(prompt_content.strip()) == 0:
+                last_content = messages[-1].get("content", "")
+                # Extract text from structured content if needed
+                if isinstance(last_content, list):
+                    text_parts = [part.get('text', '') for part in last_content if part.get('type') == 'text']
+                    prompt_content = ' '.join(text_parts)
+                elif isinstance(last_content, str):
+                    prompt_content = last_content
+            
+            if not prompt_content or not prompt_content.strip():
                 prompt_content = "A short abstract motion graphic in warm colors"
 
             # Optional duration/size via env
@@ -352,21 +392,45 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             seen_contents = set()
             
             for msg in messages:
-                # Skip empty messages
-                if not msg.get("content", ""):
+                # Skip empty messages - handle both string and list content
+                content = msg.get("content", "")
+                is_empty = False
+                if isinstance(content, list):
+                    # For structured content, check if all parts are empty
+                    text_parts = [part.get('text', '').strip() for part in content if part.get('type') == 'text']
+                    has_image = any(part.get('type') == 'image' for part in content)
+                    is_empty = not text_parts and not has_image
+                elif isinstance(content, str):
+                    is_empty = not content
+                else:
+                    is_empty = not content
+                    
+                if is_empty:
                     continue
                     
                 # Handle system message separately
                 if msg.get("role") == "system":
                     continue
                     
-                # Check for duplicates by content
+                # Check for duplicates by content - create hashable representation
                 content = msg.get("content", "")
-                if content in seen_contents:
-                    print(f"Skipping duplicate message in AI turn: {content[:30]}...")
+                
+                # Create a hashable content_hash for duplicate detection
+                if isinstance(content, list):
+                    # For structured messages, use text parts for hash
+                    text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
+                    content_hash = ''.join(text_parts)
+                elif isinstance(content, str):
+                    content_hash = content
+                else:
+                    content_hash = str(content) if content else ""
+                
+                if content_hash and content_hash in seen_contents:
+                    print(f"Skipping duplicate message in AI turn: {content_hash[:30]}...")
                     continue
                 
-                seen_contents.add(content)
+                if content_hash:
+                    seen_contents.add(content_hash)
                 final_messages.append(msg)
             
             # Ensure we have at least one message
@@ -583,10 +647,46 @@ class ConversationManager:
         
         # Add user input if provided
         if user_input:
-            user_message = {
-                "role": "user",
-                "content": user_input
-            }
+            # Handle both string and dict input (dict for image support)
+            if isinstance(user_input, dict):
+                # Extract text and image data
+                text = user_input.get('text', '')
+                image_data = user_input.get('image')
+                
+                if image_data:
+                    # Create message with image
+                    user_message = {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": image_data['media_type'],
+                                    "data": image_data['base64']
+                                }
+                            }
+                        ]
+                    }
+                    # Add text if provided
+                    if text:
+                        user_message["content"].insert(0, {
+                            "type": "text",
+                            "text": text
+                        })
+                else:
+                    # Text-only message
+                    user_message = {
+                        "role": "user",
+                        "content": text
+                    }
+            else:
+                # Legacy string input
+                user_message = {
+                    "role": "user",
+                    "content": user_input
+                }
+                
             self.app.main_conversation.append(user_message)
             
             # Update the conversation display with the new user message
@@ -744,10 +844,46 @@ class ConversationManager:
         
         # Add user input if provided
         if user_input:
-            user_message = {
-                "role": "user",
-                "content": user_input
-            }
+            # Handle both string and dict input (dict for image support)
+            if isinstance(user_input, dict):
+                # Extract text and image data
+                text = user_input.get('text', '')
+                image_data = user_input.get('image')
+                
+                if image_data:
+                    # Create message with image
+                    user_message = {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": image_data['media_type'],
+                                    "data": image_data['base64']
+                                }
+                            }
+                        ]
+                    }
+                    # Add text if provided
+                    if text:
+                        user_message["content"].insert(0, {
+                            "type": "text",
+                            "text": text
+                        })
+                else:
+                    # Text-only message
+                    user_message = {
+                        "role": "user",
+                        "content": text
+                    }
+            else:
+                # Legacy string input
+                user_message = {
+                    "role": "user",
+                    "content": user_input
+                }
+                
             conversation.append(user_message)
             
             # Update the conversation display with the new user message
@@ -1442,11 +1578,31 @@ class ConversationManager:
                 # Skip special system messages or empty messages
                 if role == "system" and msg.get("_type") == "branch_indicator":
                     continue
-                if not content.strip():
+                
+                # Check if content is empty (handle both string and list)
+                is_empty = False
+                if isinstance(content, str):
+                    is_empty = not content.strip()
+                elif isinstance(content, list):
+                    # For structured content, check if all text parts are empty
+                    text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
+                    is_empty = not any(text_parts) and not any(part.get('type') == 'image' for part in content)
+                else:
+                    is_empty = not content
+                
+                if is_empty:
                     continue
                 
+                # Extract text content from structured messages
+                text_content = ""
+                if isinstance(content, str):
+                    text_content = content
+                elif isinstance(content, list):
+                    text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
+                    text_content = '\n'.join(text_parts)
+                
                 # Process content to properly format code blocks and add greentext styling
-                processed_content = self.app.left_pane.process_content_with_code_blocks(content)
+                processed_content = self.app.left_pane.process_content_with_code_blocks(text_content) if text_content else ""
                 
                 # Apply greentext styling to lines starting with '>'
                 processed_content = self.apply_greentext_styling(processed_content)
@@ -1457,12 +1613,23 @@ class ConversationManager:
                 # Check if this message has an associated image
                 has_image = False
                 image_path = None
+                image_base64 = None
                 
-                # Check for image in this message
+                # Check for generated image path
                 if hasattr(msg, "get") and callable(msg.get):
                     image_path = msg.get("generated_image_path", None)
                     if image_path:
                         has_image = True
+                
+                # Check for uploaded image in structured content
+                if isinstance(content, list):
+                    for part in content:
+                        if part.get('type') == 'image':
+                            source = part.get('source', {})
+                            if source.get('type') == 'base64':
+                                image_base64 = source.get('data', '')
+                                has_image = True
+                                break
                 
                 # Start message div
                 html_content += f'\n        <div class="message {message_class}">'
@@ -1488,11 +1655,15 @@ class ConversationManager:
                 html_content += '\n            </div>'
                 
                 # Add image if present
-                if has_image and image_path:
-                    # Convert Windows path format to web format if needed
-                    web_path = image_path.replace('\\', '/')
+                if has_image:
                     html_content += f'\n            <div class="message-image">'
-                    html_content += f'\n                <img src="{web_path}" alt="Generated image" />'
+                    if image_base64:
+                        # Use base64 data directly
+                        html_content += f'\n                <img src="data:image/jpeg;base64,{image_base64}" alt="Uploaded image" />'
+                    elif image_path:
+                        # Convert Windows path format to web format if needed
+                        web_path = image_path.replace('\\', '/')
+                        html_content += f'\n                <img src="{web_path}" alt="Generated image" />'
                     html_content += f'\n            </div>'
                 
                 # Close message div

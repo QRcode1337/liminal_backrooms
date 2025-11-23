@@ -17,6 +17,7 @@ import networkx as nx
 import re
 import sys
 import webbrowser
+import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
 from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox
@@ -1186,6 +1187,10 @@ class ConversationPane(QWidget):
         # Images list - to prevent garbage collection
         self.images = []
         self.image_paths = []
+        
+        # Uploaded image for current message
+        self.uploaded_image_path = None
+        self.uploaded_image_base64 = None
 
         # Create text formats with different colors
         self.text_formats = {
@@ -1314,6 +1319,28 @@ class ConversationPane(QWidget):
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(5)  # Reduced spacing
         
+        # Upload image button
+        self.upload_image_button = QPushButton("📎 Image")
+        self.upload_image_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-weight: bold;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['border']};
+                border: 1px solid {COLORS['border_highlight']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['border_highlight']};
+            }}
+        """)
+        self.upload_image_button.setToolTip("Upload an image to include in your message")
+        
         # Clear button
         self.clear_button = QPushButton("Clear")
         self.clear_button.setStyleSheet(f"""
@@ -1360,6 +1387,7 @@ class ConversationPane(QWidget):
         """)
         
         # Add buttons to layout
+        button_layout.addWidget(self.upload_image_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addStretch()
         button_layout.addWidget(self.submit_button)
@@ -1380,6 +1408,9 @@ class ConversationPane(QWidget):
         # Submit button
         self.submit_button.clicked.connect(self.handle_propagate_click)
         
+        # Upload image button
+        self.upload_image_button.clicked.connect(self.handle_upload_image)
+        
         # Clear button
         self.clear_button.clicked.connect(self.clear_input)
         
@@ -1389,7 +1420,60 @@ class ConversationPane(QWidget):
     def clear_input(self):
         """Clear the input field"""
         self.input_field.clear()
+        self.uploaded_image_path = None
+        self.uploaded_image_base64 = None
+        self.upload_image_button.setText("📎 Image")
         self.input_field.setFocus()
+    
+    def handle_upload_image(self):
+        """Handle image upload button click"""
+        # Open file dialog
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getOpenFileName(
+            self,
+            "Select Image",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                # Read and encode the image to base64
+                with open(file_path, 'rb') as image_file:
+                    image_data = image_file.read()
+                    image_base64 = base64.b64encode(image_data).decode('utf-8')
+                
+                # Determine media type
+                file_extension = os.path.splitext(file_path)[1].lower()
+                media_type_map = {
+                    '.png': 'image/png',
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.gif': 'image/gif',
+                    '.webp': 'image/webp'
+                }
+                media_type = media_type_map.get(file_extension, 'image/jpeg')
+                
+                # Store the image data
+                self.uploaded_image_path = file_path
+                self.uploaded_image_base64 = {
+                    'data': image_base64,
+                    'media_type': media_type
+                }
+                
+                # Update button text to show an image is attached
+                file_name = os.path.basename(file_path)
+                self.upload_image_button.setText(f"📎 {file_name[:15]}...")
+                
+                # Update placeholder text
+                self.input_field.setPlaceholderText("Add a message about your image (optional)...")
+                
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Upload Error",
+                    f"Failed to load image: {str(e)}"
+                )
     
     def eventFilter(self, obj, event):
         """Filter events to handle Enter key in input field"""
@@ -1404,12 +1488,30 @@ class ConversationPane(QWidget):
         # Get the input text (might be empty)
         input_text = self.input_field.toPlainText().strip()
         
-        # Clear the input box
+        # Prepare message data (text + optional image)
+        message_data = {
+            'text': input_text,
+            'image': None
+        }
+        
+        # Include image if one was uploaded
+        if self.uploaded_image_base64:
+            message_data['image'] = {
+                'path': self.uploaded_image_path,
+                'base64': self.uploaded_image_base64['data'],
+                'media_type': self.uploaded_image_base64['media_type']
+            }
+        
+        # Clear the input box and image
         self.input_field.clear()
+        self.uploaded_image_path = None
+        self.uploaded_image_base64 = None
+        self.upload_image_button.setText("📎 Image")
+        self.input_field.setPlaceholderText("Seed the conversation or just click propagate...")
         
         # Always call the input callback, even with empty input
         if hasattr(self, 'input_callback') and self.input_callback:
-            self.input_callback(input_text)
+            self.input_callback(message_data)
         
         # Start loading animation
         self.start_loading()
@@ -1459,8 +1561,27 @@ class ConversationPane(QWidget):
             ai_name = message.get("ai_name", "")
             model = message.get("model", "")
             
-            # Skip empty messages
-            if not content:
+            # Handle structured content (with images)
+            has_image = False
+            image_base64 = None
+            text_content = ""
+            
+            if isinstance(content, list):
+                # Structured content with potential images
+                for part in content:
+                    if part.get('type') == 'text':
+                        text_content += part.get('text', '')
+                    elif part.get('type') == 'image':
+                        has_image = True
+                        source = part.get('source', {})
+                        if source.get('type') == 'base64':
+                            image_base64 = source.get('data', '')
+            else:
+                # Plain text content
+                text_content = content
+            
+            # Skip empty messages (no text and no image)
+            if not text_content and not has_image:
                 continue
                 
             # Handle branch indicators with special styling
@@ -1474,13 +1595,21 @@ class ConversationPane(QWidget):
             # Removed HTML contribution indicator logic
             
             # Process content to handle code blocks
-            processed_content = self.process_content_with_code_blocks(content)
+            processed_content = self.process_content_with_code_blocks(text_content) if text_content else ""
+            
+            # Add image display if present
+            image_html = ""
+            if has_image and image_base64:
+                image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);" /></div>'
             
             # Format based on role
             if role == 'user':
                 # User message
                 html += f'<div class="message user">'
-                html += f'<div class="content">{processed_content}</div>'
+                if image_html:
+                    html += image_html
+                if processed_content:
+                    html += f'<div class="content">{processed_content}</div>'
                 html += f'</div>'
             elif role == 'assistant':
                 # AI message
@@ -1489,7 +1618,10 @@ class ConversationPane(QWidget):
                     display_name += f" ({model})"
                 html += f'<div class="message assistant">'
                 html += f'<div class="header">\n{display_name}\n</div>'
-                html += f'<div class="content">{processed_content}</div>'
+                if image_html:
+                    html += image_html
+                if processed_content:
+                    html += f'<div class="content">{processed_content}</div>'
                 
                 # Removed HTML contribution indicator
                 
