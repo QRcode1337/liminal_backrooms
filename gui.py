@@ -2014,6 +2014,296 @@ class ConversationPane(QWidget):
             print(error_msg)
 
 
+class SearchDialog(QWidget):
+    """Dialog for searching through conversations"""
+
+    searchRequested = pyqtSignal(str, bool, bool)  # query, case_sensitive, whole_word
+    resultSelected = pyqtSignal(str, int)  # branch_id, message_index
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Search Conversations")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self.search_results = []
+        self.current_result_index = -1
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Set up the search dialog UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        # Title
+        title = QLabel("Search Conversations")
+        title.setStyleSheet(f"""
+            color: {COLORS["text_bright"]};
+            font-size: 16px;
+            font-weight: bold;
+            padding-bottom: 5px;
+        """)
+        layout.addWidget(title)
+
+        # Search input
+        search_input_layout = QHBoxLayout()
+        self.search_input = QTextEdit()
+        self.search_input.setPlaceholderText("Enter search query...")
+        self.search_input.setMaximumHeight(60)
+        self.search_input.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLORS["bg_light"]};
+                color: {COLORS["text_normal"]};
+                border: 2px solid {COLORS["border"]};
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {COLORS["accent_blue"]};
+            }}
+        """)
+        search_input_layout.addWidget(self.search_input)
+
+        # Search button
+        self.search_button = QPushButton("Search")
+        self.search_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS["accent_blue"]};
+                color: {COLORS["text_bright"]};
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS["accent_blue_hover"]};
+            }}
+        """)
+        self.search_button.clicked.connect(self.perform_search)
+        search_input_layout.addWidget(self.search_button)
+
+        layout.addLayout(search_input_layout)
+
+        # Search options
+        options_layout = QHBoxLayout()
+
+        self.case_sensitive_check = QCheckBox("Case sensitive")
+        self.case_sensitive_check.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS["text_normal"]};
+                spacing: 5px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {COLORS["border"]};
+                border-radius: 3px;
+                background-color: {COLORS["bg_light"]};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLORS["accent_blue"]};
+                border: 1px solid {COLORS["accent_blue"]};
+            }}
+        """)
+        options_layout.addWidget(self.case_sensitive_check)
+
+        self.whole_word_check = QCheckBox("Whole word")
+        self.whole_word_check.setStyleSheet(self.case_sensitive_check.styleSheet())
+        options_layout.addWidget(self.whole_word_check)
+
+        self.search_all_branches = QCheckBox("Search all branches")
+        self.search_all_branches.setStyleSheet(self.case_sensitive_check.styleSheet())
+        self.search_all_branches.setChecked(True)
+        options_layout.addWidget(self.search_all_branches)
+
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+
+        # Results display
+        results_label = QLabel("Results:")
+        results_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        layout.addWidget(results_label)
+
+        self.results_list = QTextEdit()
+        self.results_list.setReadOnly(True)
+        self.results_list.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLORS["bg_medium"]};
+                color: {COLORS["text_normal"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 4px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+            }}
+        """)
+        layout.addWidget(self.results_list)
+
+        # Navigation buttons
+        nav_layout = QHBoxLayout()
+
+        self.prev_button = QPushButton("← Previous")
+        self.prev_button.setEnabled(False)
+        self.prev_button.clicked.connect(self.go_to_previous_result)
+        self.prev_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS["bg_light"]};
+                color: {COLORS["text_normal"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 4px;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover:enabled {{
+                background-color: {COLORS["border"]};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS["text_dim"]};
+            }}
+        """)
+        nav_layout.addWidget(self.prev_button)
+
+        self.result_counter = QLabel("0 / 0")
+        self.result_counter.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        self.result_counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.result_counter)
+
+        self.next_button = QPushButton("Next →")
+        self.next_button.setEnabled(False)
+        self.next_button.clicked.connect(self.go_to_next_result)
+        self.next_button.setStyleSheet(self.prev_button.styleSheet())
+        nav_layout.addWidget(self.next_button)
+
+        layout.addLayout(nav_layout)
+
+        # Close button
+        close_button = QPushButton("Close")
+        close_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS["bg_light"]};
+                color: {COLORS["text_normal"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 4px;
+                padding: 8px 20px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS["border"]};
+            }}
+        """)
+        close_button.clicked.connect(self.close)
+        layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Set dialog size
+        self.setFixedSize(650, 550)
+
+        # Apply dark theme
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS["bg_dark"]};
+                color: {COLORS["text_normal"]};
+            }}
+        """)
+
+        # Connect enter key to search
+        self.search_input.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Handle Enter key in search input"""
+        if obj is self.search_input and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Return and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self.perform_search()
+                return True
+        return super().eventFilter(obj, event)
+
+    def perform_search(self):
+        """Perform the search with current query and options"""
+        query = self.search_input.toPlainText().strip()
+        if not query:
+            return
+
+        case_sensitive = self.case_sensitive_check.isChecked()
+        whole_word = self.whole_word_check.isChecked()
+
+        # Emit search request signal
+        self.searchRequested.emit(query, case_sensitive, whole_word)
+
+    def display_results(self, results):
+        """Display search results in the results list"""
+        self.search_results = results
+        self.current_result_index = 0 if results else -1
+
+        if not results:
+            self.results_list.setHtml(f"""
+                <div style="color: {COLORS['text_dim']}; text-align: center; padding: 20px;">
+                    No results found
+                </div>
+            """)
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.result_counter.setText("0 / 0")
+            return
+
+        # Format results as HTML
+        html = "<style>"
+        html += f"body {{ font-family: 'Segoe UI', sans-serif; line-height: 1.6; }}"
+        html += f".result {{ margin-bottom: 15px; padding: 10px; background-color: {COLORS['bg_light']}; border-left: 3px solid {COLORS['accent_blue']}; border-radius: 3px; }}"
+        html += f".result-header {{ color: {COLORS['accent_blue']}; font-weight: bold; margin-bottom: 5px; }}"
+        html += f".result-context {{ color: {COLORS['text_normal']}; }}"
+        html += f".match {{ background-color: {COLORS['accent_yellow']}; color: {COLORS['bg_dark']}; padding: 2px 4px; font-weight: bold; }}"
+        html += "</style>"
+
+        for i, result in enumerate(results):
+            branch_name = result.get('branch_name', 'Main')
+            context = result.get('context', '')
+            message_index = result.get('message_index', 0)
+
+            html += f'<div class="result" data-index="{i}">'
+            html += f'<div class="result-header">📍 {branch_name} (Message {message_index + 1})</div>'
+            html += f'<div class="result-context">{context}</div>'
+            html += '</div>'
+
+        self.results_list.setHtml(html)
+
+        # Update navigation
+        self.update_navigation()
+
+    def update_navigation(self):
+        """Update navigation buttons and counter"""
+        if not self.search_results:
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.result_counter.setText("0 / 0")
+            return
+
+        total = len(self.search_results)
+        current = self.current_result_index + 1
+
+        self.result_counter.setText(f"{current} / {total}")
+        self.prev_button.setEnabled(self.current_result_index > 0)
+        self.next_button.setEnabled(self.current_result_index < total - 1)
+
+    def go_to_previous_result(self):
+        """Navigate to previous search result"""
+        if self.current_result_index > 0:
+            self.current_result_index -= 1
+            self.jump_to_current_result()
+            self.update_navigation()
+
+    def go_to_next_result(self):
+        """Navigate to next search result"""
+        if self.current_result_index < len(self.search_results) - 1:
+            self.current_result_index += 1
+            self.jump_to_current_result()
+            self.update_navigation()
+
+    def jump_to_current_result(self):
+        """Jump to the currently selected result"""
+        if 0 <= self.current_result_index < len(self.search_results):
+            result = self.search_results[self.current_result_index]
+            branch_id = result.get('branch_id', 'main')
+            message_index = result.get('message_index', 0)
+            self.resultSelected.emit(branch_id, message_index)
+
+
 class KeyboardShortcutsDialog(QWidget):
     """Dialog showing available keyboard shortcuts"""
 
@@ -2075,9 +2365,14 @@ class KeyboardShortcutsDialog(QWidget):
         </div>
 
         <div class="section">
+            <div class="section-title">🔍 Search</div>
+            <div class="shortcut"><span class="key">{modifier}+F</span> - Search conversations</div>
+        </div>
+
+        <div class="section">
             <div class="section-title">🌳 Branching</div>
             <div class="shortcut"><span class="key">{modifier}+R</span> - Rabbithole from selection</div>
-            <div class="shortcut"><span class="key">{modifier}+F</span> - Fork from selection</div>
+            <div class="shortcut"><span class="key">{modifier}+Shift+F</span> - Fork from selection</div>
         </div>
 
         <div class="section">
@@ -2264,9 +2559,13 @@ class LiminalBackroomsApp(QMainWindow):
         self.shortcut_rabbithole = QShortcut(QKeySequence("Ctrl+R"), self)
         self.shortcut_rabbithole.activated.connect(self.rabbithole_from_selection)
 
-        # Fork from selection - Ctrl+F
-        self.shortcut_fork = QShortcut(QKeySequence("Ctrl+F"), self)
+        # Fork from selection - Ctrl+Shift+F
+        self.shortcut_fork = QShortcut(QKeySequence("Ctrl+Shift+F"), self)
         self.shortcut_fork.activated.connect(self.fork_from_selection_shortcut)
+
+        # Search conversations - Ctrl+F
+        self.shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_search.activated.connect(self.show_search_dialog)
 
         # Export conversation - Ctrl+E
         self.shortcut_export = QShortcut(QKeySequence("Ctrl+E"), self)
@@ -2359,6 +2658,105 @@ class LiminalBackroomsApp(QMainWindow):
 
             # Update status
             self.statusBar().showMessage("All conversations cleared", 3000)
+
+    def show_search_dialog(self):
+        """Show the search dialog"""
+        if not hasattr(self, 'search_dialog'):
+            self.search_dialog = SearchDialog(self)
+            # Connect signals
+            self.search_dialog.searchRequested.connect(self.perform_search)
+            self.search_dialog.resultSelected.connect(self.jump_to_search_result)
+
+        self.search_dialog.show()
+        self.search_dialog.raise_()
+        self.search_dialog.activateWindow()
+        self.search_dialog.search_input.setFocus()
+
+    def perform_search(self, query, case_sensitive, whole_word):
+        """Perform search across all conversations and branches"""
+        import re
+
+        results = []
+
+        # Helper function to search in a conversation
+        def search_conversation(conversation, branch_id, branch_name):
+            for i, message in enumerate(conversation):
+                content = message.get('content', '')
+                if not content:
+                    continue
+
+                # Skip branch indicators and hidden messages
+                if message.get('_type') == 'branch_indicator' or message.get('hidden'):
+                    continue
+
+                # Prepare search pattern
+                pattern = re.escape(query) if whole_word else query
+                if whole_word:
+                    pattern = r'\b' + pattern + r'\b'
+
+                flags = 0 if case_sensitive else re.IGNORECASE
+
+                # Search for matches
+                matches = list(re.finditer(pattern, content, flags))
+
+                if matches:
+                    # Extract context around first match (50 chars before and after)
+                    match = matches[0]
+                    start = max(0, match.start() - 50)
+                    end = min(len(content), match.end() + 50)
+                    context = content[start:end]
+
+                    # Add ellipsis if truncated
+                    if start > 0:
+                        context = '...' + context
+                    if end < len(content):
+                        context = context + '...'
+
+                    # Highlight the match in context
+                    match_text = content[match.start():match.end()]
+                    context = context.replace(match_text, f'<span class="match">{match_text}</span>')
+
+                    # Add result
+                    results.append({
+                        'branch_id': branch_id,
+                        'branch_name': branch_name,
+                        'message_index': i,
+                        'context': context,
+                        'match_count': len(matches)
+                    })
+
+        # Search main conversation
+        if hasattr(self, 'main_conversation'):
+            search_conversation(self.main_conversation, 'main', 'Main Conversation')
+
+        # Search all branches if option is selected
+        if hasattr(self.search_dialog, 'search_all_branches') and self.search_dialog.search_all_branches.isChecked():
+            for branch_id, branch_data in self.branch_conversations.items():
+                branch_type = branch_data.get('type', 'branch')
+                selected_text = branch_data.get('selected_text', '')
+                branch_name = f"{branch_type.capitalize()}: {selected_text[:30]}..."
+
+                conversation = branch_data.get('conversation', [])
+                search_conversation(conversation, branch_id, branch_name)
+
+        # Display results in search dialog
+        if hasattr(self, 'search_dialog'):
+            self.search_dialog.display_results(results)
+
+            # Update status bar
+            if results:
+                self.statusBar().showMessage(f"Found {len(results)} results for '{query}'", 5000)
+            else:
+                self.statusBar().showMessage(f"No results found for '{query}'", 5000)
+
+    def jump_to_search_result(self, branch_id, message_index):
+        """Jump to a specific search result"""
+        # Switch to the branch
+        self.on_branch_select(branch_id)
+
+        # Scroll to the message (if possible)
+        # This is a simplified version - you could enhance it to scroll to the exact message
+        self.statusBar().showMessage(f"Jumped to message {message_index + 1} in {branch_id}", 3000)
 
     def handle_user_input(self, text):
         """Handle user input from the conversation pane"""
