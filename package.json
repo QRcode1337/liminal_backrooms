@@ -4,6 +4,7 @@
   "description": "AI-to-AI debate system",
   "private": true,
   "scripts": {
+     "build": "vite build",
     "typecheck": "pyright",
     "typecheck:watch": "pyright --watch"
   },
