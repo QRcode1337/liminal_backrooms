@@ -29,12 +29,14 @@ from PyQt6.QtGui import (
     QFont,
     QFontDatabase,
     QImage,
+    QKeySequence,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
     QRadialGradient,
+    QShortcut,
     QTextCharFormat,
     QTextCursor,
 )
@@ -1094,6 +1096,7 @@ class ControlPanel(QWidget):
 
         # Export button
         self.export_button = QPushButton("Export")
+        self.export_button.setToolTip("Export conversation to file (Ctrl+E)")
         self.export_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS["bg_light"]};
@@ -1115,6 +1118,7 @@ class ControlPanel(QWidget):
 
         # View HTML button (removed)
         self.view_html_button = QPushButton("View HTML")
+        self.view_html_button.setToolTip("View shared HTML document (Ctrl+H)")
         self.view_html_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS["accent_green"]};
@@ -1140,6 +1144,7 @@ class ControlPanel(QWidget):
 
         # View Full HTML button
         self.view_full_html_button = QPushButton("View Dark HTML")
+        self.view_full_html_button.setToolTip("View full conversation in dark mode (Ctrl+Shift+H)")
         self.view_full_html_button.setStyleSheet("""
             QPushButton {
                 background-color: #212121;
@@ -1364,9 +1369,20 @@ class ConversationPane(QWidget):
             padding: 2px;
         """)
 
+        # Help indicator for keyboard shortcuts
+        self.help_indicator = QLabel("Press F1 for shortcuts")
+        self.help_indicator.setStyleSheet(f"""
+            color: {COLORS["accent_green"]};
+            font-size: 10px;
+            padding: 2px;
+            font-style: italic;
+        """)
+        self.help_indicator.setToolTip("Press F1 or Ctrl+/ to see all keyboard shortcuts")
+
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
         title_layout.addWidget(self.info_label)
+        title_layout.addWidget(self.help_indicator)
 
         layout.addLayout(title_layout)
 
@@ -1454,6 +1470,7 @@ class ConversationPane(QWidget):
 
         # Clear button
         self.clear_button = QPushButton("Clear")
+        self.clear_button.setToolTip("Clear input field (Ctrl+K)")
         self.clear_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS["bg_light"]};
@@ -1475,6 +1492,7 @@ class ConversationPane(QWidget):
 
         # Submit button with modern styling
         self.submit_button = QPushButton("Propagate")
+        self.submit_button.setToolTip("Send message and start AI conversation (Ctrl+Enter)")
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS["accent_blue"]};
@@ -1996,6 +2014,119 @@ class ConversationPane(QWidget):
             print(error_msg)
 
 
+class KeyboardShortcutsDialog(QWidget):
+    """Dialog showing available keyboard shortcuts"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Keyboard Shortcuts")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Set up the shortcuts help UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        # Title
+        title = QLabel("Keyboard Shortcuts")
+        title.setStyleSheet(f"""
+            color: {COLORS["text_bright"]};
+            font-size: 18px;
+            font-weight: bold;
+            padding-bottom: 10px;
+        """)
+        layout.addWidget(title)
+
+        # Shortcuts list
+        shortcuts_text = QTextEdit()
+        shortcuts_text.setReadOnly(True)
+        shortcuts_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLORS["bg_medium"]};
+                color: {COLORS["text_normal"]};
+                border: 1px solid {COLORS["border"]};
+                border-radius: 4px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+            }}
+        """)
+
+        # Platform-specific modifier key
+        modifier = "Ctrl" if os.name != "posix" or "darwin" not in os.sys.platform else "Cmd"
+
+        shortcuts_html = f"""
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; line-height: 1.6; }}
+            .section {{ margin-bottom: 15px; }}
+            .section-title {{ color: {COLORS["accent_blue"]}; font-weight: bold; font-size: 12px; margin-bottom: 5px; }}
+            .shortcut {{ margin-left: 10px; margin-bottom: 3px; }}
+            .key {{ color: {COLORS["accent_green"]}; font-weight: bold; font-family: 'Consolas', monospace; }}
+        </style>
+
+        <div class="section">
+            <div class="section-title">🚀 Conversation Actions</div>
+            <div class="shortcut"><span class="key">{modifier}+Enter</span> - Send message / Propagate</div>
+            <div class="shortcut"><span class="key">{modifier}+K</span> - Clear input field</div>
+            <div class="shortcut"><span class="key">{modifier}+M</span> - Return to main conversation</div>
+            <div class="shortcut"><span class="key">{modifier}+N</span> - New/Clear conversation</div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">🌳 Branching</div>
+            <div class="shortcut"><span class="key">{modifier}+R</span> - Rabbithole from selection</div>
+            <div class="shortcut"><span class="key">{modifier}+F</span> - Fork from selection</div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">💾 Export & View</div>
+            <div class="shortcut"><span class="key">{modifier}+E</span> - Export conversation</div>
+            <div class="shortcut"><span class="key">{modifier}+H</span> - View HTML (shared)</div>
+            <div class="shortcut"><span class="key">{modifier}+Shift+H</span> - View Dark HTML</div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">⌨️ UI Navigation</div>
+            <div class="shortcut"><span class="key">Escape</span> - Close dialogs / Cancel</div>
+            <div class="shortcut"><span class="key">F1</span> or <span class="key">{modifier}+/</span> - Show this help</div>
+        </div>
+        """
+
+        shortcuts_text.setHtml(shortcuts_html)
+        layout.addWidget(shortcuts_text)
+
+        # Close button
+        close_button = QPushButton("Close")
+        close_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS["accent_blue"]};
+                color: {COLORS["text_bright"]};
+                border: none;
+                border-radius: 4px;
+                padding: 8px 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS["accent_blue_hover"]};
+            }}
+        """)
+        close_button.clicked.connect(self.close)
+        layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Set dialog size
+        self.setFixedSize(500, 450)
+
+        # Apply dark theme
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS["bg_dark"]};
+                color: {COLORS["text_normal"]};
+            }}
+        """)
+
+
 class LiminalBackroomsApp(QMainWindow):
     """Main application window"""
 
@@ -2015,6 +2146,9 @@ class LiminalBackroomsApp(QMainWindow):
 
         # Connect signals and slots
         self.connect_signals()
+
+        # Set up keyboard shortcuts
+        self.setup_keyboard_shortcuts()
 
         # Dark theme
         self.apply_dark_theme()
@@ -2107,6 +2241,124 @@ class LiminalBackroomsApp(QMainWindow):
 
         # Save splitter state when it moves
         self.splitter.splitterMoved.connect(self.save_splitter_state)
+
+    def setup_keyboard_shortcuts(self):
+        """Set up keyboard shortcuts for the application"""
+        # Propagate / Send message - Ctrl+Enter
+        self.shortcut_propagate = QShortcut(QKeySequence("Ctrl+Return"), self)
+        self.shortcut_propagate.activated.connect(self.left_pane.handle_propagate_click)
+
+        # Clear input - Ctrl+K
+        self.shortcut_clear = QShortcut(QKeySequence("Ctrl+K"), self)
+        self.shortcut_clear.activated.connect(self.left_pane.clear_input)
+
+        # Return to main conversation - Ctrl+M
+        self.shortcut_main = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.shortcut_main.activated.connect(lambda: self.on_branch_select("main"))
+
+        # New/Clear conversation - Ctrl+N
+        self.shortcut_new = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.shortcut_new.activated.connect(self.clear_all_conversations)
+
+        # Rabbithole from selection - Ctrl+R
+        self.shortcut_rabbithole = QShortcut(QKeySequence("Ctrl+R"), self)
+        self.shortcut_rabbithole.activated.connect(self.rabbithole_from_selection)
+
+        # Fork from selection - Ctrl+F
+        self.shortcut_fork = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_fork.activated.connect(self.fork_from_selection_shortcut)
+
+        # Export conversation - Ctrl+E
+        self.shortcut_export = QShortcut(QKeySequence("Ctrl+E"), self)
+        self.shortcut_export.activated.connect(self.export_conversation)
+
+        # View HTML (shared) - Ctrl+H
+        self.shortcut_view_html = QShortcut(QKeySequence("Ctrl+H"), self)
+        self.shortcut_view_html.activated.connect(
+            lambda: open_html_in_browser("shared_document.html")
+        )
+
+        # View Dark HTML - Ctrl+Shift+H
+        self.shortcut_view_dark_html = QShortcut(QKeySequence("Ctrl+Shift+H"), self)
+        self.shortcut_view_dark_html.activated.connect(
+            lambda: open_html_in_browser("conversation_full.html")
+        )
+
+        # Show keyboard shortcuts help - F1 and Ctrl+/
+        self.shortcut_help_f1 = QShortcut(QKeySequence("F1"), self)
+        self.shortcut_help_f1.activated.connect(self.show_keyboard_shortcuts)
+
+        self.shortcut_help_slash = QShortcut(QKeySequence("Ctrl+/"), self)
+        self.shortcut_help_slash.activated.connect(self.show_keyboard_shortcuts)
+
+    def show_keyboard_shortcuts(self):
+        """Show the keyboard shortcuts help dialog"""
+        if not hasattr(self, 'shortcuts_dialog'):
+            self.shortcuts_dialog = KeyboardShortcutsDialog(self)
+        self.shortcuts_dialog.show()
+        self.shortcuts_dialog.raise_()
+        self.shortcuts_dialog.activateWindow()
+
+    def rabbithole_from_selection(self):
+        """Create rabbithole from current selection"""
+        cursor = self.left_pane.conversation_display.textCursor()
+        selected_text = cursor.selectedText()
+        if selected_text:
+            self.branch_from_selection(selected_text)
+        else:
+            self.statusBar().showMessage("Please select text first to create a rabbithole", 3000)
+
+    def fork_from_selection_shortcut(self):
+        """Create fork from current selection"""
+        cursor = self.left_pane.conversation_display.textCursor()
+        selected_text = cursor.selectedText()
+        if selected_text:
+            self.fork_from_selection(selected_text)
+        else:
+            self.statusBar().showMessage("Please select text first to create a fork", 3000)
+
+    def clear_all_conversations(self):
+        """Clear all conversations and reset to initial state"""
+        reply = QMessageBox.question(
+            self,
+            "Clear All Conversations",
+            "Are you sure you want to clear all conversations and branches? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Clear main conversation
+            if hasattr(self, 'main_conversation'):
+                self.main_conversation = []
+            self.conversation = []
+
+            # Clear all branches
+            self.branch_conversations = {}
+            self.active_branch = None
+
+            # Clear images
+            self.images = []
+            self.image_paths = []
+
+            # Reset turn count
+            self.turn_count = 0
+
+            # Reset network graph
+            self.right_pane.graph.clear()
+            self.right_pane.node_positions = {}
+            self.right_pane.node_colors = {}
+            self.right_pane.node_labels = {}
+            self.right_pane.node_sizes = {}
+
+            # Re-add main node
+            self.right_pane.add_node("main", "Seed", "main")
+
+            # Clear conversation display
+            self.left_pane.clear_conversation()
+
+            # Update status
+            self.statusBar().showMessage("All conversations cleared", 3000)
 
     def handle_user_input(self, text):
         """Handle user input from the conversation pane"""
