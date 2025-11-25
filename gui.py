@@ -1053,6 +1053,23 @@ class ControlPanel(QWidget):
         iterations_layout.addWidget(self.iterations_selector)
         controls_layout.addWidget(iterations_container)
         
+        # Number of AIs selection
+        num_ais_container = QWidget()
+        num_ais_layout = QVBoxLayout(num_ais_container)
+        num_ais_layout.setContentsMargins(0, 0, 0, 0)
+        num_ais_layout.setSpacing(5)
+        
+        num_ais_label = QLabel("▸ NUMBER OF AIs")
+        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        num_ais_layout.addWidget(num_ais_label)
+        
+        self.num_ais_selector = QComboBox()
+        self.num_ais_selector.addItems(["1", "2", "3", "4", "5"])
+        self.num_ais_selector.setCurrentText("3")  # Default to 3 AIs
+        self.num_ais_selector.setStyleSheet(self.get_combobox_style())
+        num_ais_layout.addWidget(self.num_ais_selector)
+        controls_layout.addWidget(num_ais_container)
+        
         # AI-1 Model selection
         ai1_container = QWidget()
         ai1_layout = QVBoxLayout(ai1_container)
@@ -1293,13 +1310,39 @@ class ControlPanel(QWidget):
         self.ai1_model_selector.clear()
         self.ai2_model_selector.clear()
         self.ai3_model_selector.clear()
+        self.ai4_model_selector.clear()
+        self.ai5_model_selector.clear()
         self.ai1_model_selector.addItems(list(AI_MODELS.keys()))
         self.ai2_model_selector.addItems(list(AI_MODELS.keys()))
         self.ai3_model_selector.addItems(list(AI_MODELS.keys()))
+        self.ai4_model_selector.addItems(list(AI_MODELS.keys()))
+        self.ai5_model_selector.addItems(list(AI_MODELS.keys()))
         
         # Add prompt pairs
         self.prompt_pair_selector.clear()
         self.prompt_pair_selector.addItems(list(SYSTEM_PROMPT_PAIRS.keys()))
+        
+        # Connect number of AIs selector to update visibility
+        self.num_ais_selector.currentTextChanged.connect(self.update_ai_selector_visibility)
+        
+        # Set initial visibility based on default number of AIs (3)
+        self.update_ai_selector_visibility("3")
+    
+    def update_ai_selector_visibility(self, num_ais_text):
+        """Show/hide AI model selectors based on number of AIs selected"""
+        num_ais = int(num_ais_text)
+        
+        # AI-1 is always visible
+        # AI-2 visible if num_ais >= 2
+        # AI-3 visible if num_ais >= 3
+        # AI-4 visible if num_ais >= 4
+        # AI-5 visible if num_ais >= 5
+        
+        self.ai1_container.setVisible(num_ais >= 1)
+        self.ai2_container.setVisible(num_ais >= 2)
+        self.ai3_container.setVisible(num_ais >= 3)
+        self.ai4_container.setVisible(num_ais >= 4)
+        self.ai5_container.setVisible(num_ais >= 5)
 
 class ConversationContextMenu(QMenu):
     """Context menu for the conversation display"""
