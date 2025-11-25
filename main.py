@@ -706,18 +706,11 @@ class ConversationManager:
             # Update the HTML conversation document when user adds a message
             self.update_conversation_html(self.app.main_conversation)
         
-        # Get selected models from UI
-        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
+        # Get number of AIs from UI
+        num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
         
         # Get selected prompt pair
         selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
-        
-        # Get system prompts from the selected pair
-        ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
-        ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
-        ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -726,82 +719,61 @@ class ConversationManager:
         max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         if user_input is not None or not self.app.main_conversation:
             self.app.turn_count = 0
-            print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations")
+            print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations and {num_ais} AIs")
         else:
             print(f"MAIN: Continuing conversation - turn {self.app.turn_count+1} of {max_iterations}")
         
-        # Create worker threads for AI-1, AI-2, and AI-3
-        worker1 = Worker("AI-1", self.app.main_conversation, ai_1_model, ai_1_prompt, gui=self.app)
-        worker2 = Worker("AI-2", self.app.main_conversation, ai_2_model, ai_2_prompt, gui=self.app)
-        worker3 = Worker("AI-3", self.app.main_conversation, ai_3_model, ai_3_prompt, gui=self.app)
+        # Create worker threads dynamically based on number of AIs
+        workers = []
+        for i in range(1, num_ais + 1):
+            ai_name = f"AI-{i}"
+            model = self.get_model_for_ai(i)
+            prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair][ai_name]
+            
+            worker = Worker(ai_name, self.app.main_conversation, model, prompt, gui=self.app)
+            worker.signals.response.connect(self.on_ai_response_received)
+            worker.signals.result.connect(self.on_ai_result_received)
+            worker.signals.streaming_chunk.connect(self.on_streaming_chunk)
+            worker.signals.error.connect(self.on_ai_error)
+            
+            # Chain workers together
+            if i < num_ais:
+                # Not the last worker - connect to start next worker
+                next_index = i  # Capture index for lambda
+                worker.signals.finished.connect(
+                    lambda conv=self.app.main_conversation, idx=next_index: self.start_next_ai_turn(conv, workers[idx], idx+1)
+                )
+            else:
+                # Last worker - connect to handle turn completion
+                worker.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
+            
+            workers.append(worker)
         
-        # Connect signals for worker1
-        worker1.signals.response.connect(self.on_ai_response_received)
-        worker1.signals.result.connect(self.on_ai_result_received)
-        worker1.signals.streaming_chunk.connect(self.on_streaming_chunk)
-        worker1.signals.finished.connect(lambda: self.start_ai2_turn(self.app.main_conversation, worker2))
-        worker1.signals.error.connect(self.on_ai_error)
-        
-        # Connect signals for worker2
-        worker2.signals.response.connect(self.on_ai_response_received)
-        worker2.signals.result.connect(self.on_ai_result_received)
-        worker2.signals.streaming_chunk.connect(self.on_streaming_chunk)
-        worker2.signals.finished.connect(lambda: self.start_ai3_turn(self.app.main_conversation, worker3))
-        worker2.signals.error.connect(self.on_ai_error)
-        
-        # Connect signals for worker3
-        worker3.signals.response.connect(self.on_ai_response_received)
-        worker3.signals.result.connect(self.on_ai_result_received)
-        worker3.signals.streaming_chunk.connect(self.on_streaming_chunk)
-        worker3.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
-        worker3.signals.error.connect(self.on_ai_error)
-        
-        # Start AI-1's turn
-        self.thread_pool.start(worker1)
+        # Start first AI's turn
+        self.thread_pool.start(workers[0])
     
-    def start_ai2_turn(self, conversation, worker2):
-        """Start AI-2's turn in the main conversation"""
-        # Make sure conversation is up to date with AI-1's response
+    def start_next_ai_turn(self, conversation, worker, ai_number):
+        """Start the next AI's turn in the conversation"""
+        # Make sure conversation is up to date with previous AI's response
         if self.app.active_branch:
-            # Get the latest branch conversation with AI-1's response already included
+            # Get the latest branch conversation with previous AI's response already included
             branch_id = self.app.active_branch
             branch_data = self.app.branch_conversations[branch_id]
             latest_conversation = branch_data['conversation']
         else:
-            # Get the latest main conversation with AI-1's response already included
+            # Get the latest main conversation with previous AI's response already included
             latest_conversation = self.app.main_conversation
         
         # Update worker's conversation reference to ensure it has the latest state
-        # This ensures any images generated from AI-1's response are included
-        worker2.conversation = latest_conversation.copy()
+        # This ensures any images generated from previous AI's response are included
+        worker.conversation = latest_conversation.copy()
         
         # Add a small delay between turns
         time.sleep(TURN_DELAY)
         
-        # Start AI-2's turn - the ai_turn function will properly format the context
-        self.thread_pool.start(worker2)
-    
-    def start_ai3_turn(self, conversation, worker3):
-        """Start AI-3's turn in the main conversation"""
-        # Make sure conversation is up to date with AI-2's response
-        if self.app.active_branch:
-            # Get the latest branch conversation with AI-2's response already included
-            branch_id = self.app.active_branch
-            branch_data = self.app.branch_conversations[branch_id]
-            latest_conversation = branch_data['conversation']
-        else:
-            # Get the latest main conversation with AI-2's response already included
-            latest_conversation = self.app.main_conversation
-        
-        # Update worker's conversation reference to ensure it has the latest state
-        # This ensures any images generated from AI-2's response are included
-        worker3.conversation = latest_conversation.copy()
-        
-        # Add a small delay between turns
-        time.sleep(TURN_DELAY)
-        
-        # Start AI-3's turn - the ai_turn function will properly format the context
-        self.thread_pool.start(worker3)
+        # Start next AI's turn - the ai_turn function will properly format the context
+        print(f"Starting AI-{ai_number}'s turn")
+        self.thread_pool.start(worker)
     
     def handle_turn_completion(self, max_iterations=1):
         """Handle the completion of a full turn (both AIs)"""
@@ -1207,15 +1179,16 @@ class ConversationManager:
             # Do not automatically open the HTML view
             # open_html_in_browser("conversation_full.html")
     
-    def get_model_for_ai(self, ai_name):
-        """Get the selected model name for the AI"""
-        if ai_name == "AI-1":
-            return self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        elif ai_name == "AI-2":
-            return self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        elif ai_name == "AI-3":
-            return self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
-        return ""
+    def get_model_for_ai(self, ai_number):
+        """Get the selected model name for the AI by number (1-5)"""
+        selectors = {
+            1: self.app.right_sidebar.control_panel.ai1_model_selector,
+            2: self.app.right_sidebar.control_panel.ai2_model_selector,
+            3: self.app.right_sidebar.control_panel.ai3_model_selector,
+            4: self.app.right_sidebar.control_panel.ai4_model_selector,
+            5: self.app.right_sidebar.control_panel.ai5_model_selector
+        }
+        return selectors.get(ai_number, selectors[1]).currentText()
     
     def on_ai_error(self, error_message):
         """Handle AI errors for both main and branch conversations"""

@@ -1115,6 +1115,36 @@ class ControlPanel(QWidget):
         ai3_layout.addWidget(self.ai3_model_selector)
         controls_layout.addWidget(ai3_container)
         
+        # AI-4 Model selection
+        self.ai4_container = QWidget()
+        ai4_layout = QVBoxLayout(self.ai4_container)
+        ai4_layout.setContentsMargins(0, 0, 0, 0)
+        ai4_layout.setSpacing(5)
+        
+        ai4_label = QLabel("AI-4")
+        ai4_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        ai4_layout.addWidget(ai4_label)
+        
+        self.ai4_model_selector = QComboBox()
+        self.ai4_model_selector.setStyleSheet(self.get_combobox_style())
+        ai4_layout.addWidget(self.ai4_model_selector)
+        controls_layout.addWidget(self.ai4_container)
+        
+        # AI-5 Model selection
+        self.ai5_container = QWidget()
+        ai5_layout = QVBoxLayout(self.ai5_container)
+        ai5_layout.setContentsMargins(0, 0, 0, 0)
+        ai5_layout.setSpacing(5)
+        
+        ai5_label = QLabel("AI-5")
+        ai5_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        ai5_layout.addWidget(ai5_label)
+        
+        self.ai5_model_selector = QComboBox()
+        self.ai5_model_selector.setStyleSheet(self.get_combobox_style())
+        ai5_layout.addWidget(self.ai5_model_selector)
+        controls_layout.addWidget(self.ai5_container)
+        
         # Prompt pair selection
         prompt_container = QWidget()
         prompt_layout = QVBoxLayout(prompt_container)
