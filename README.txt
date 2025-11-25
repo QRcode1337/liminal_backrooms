@@ -1,6 +1,6 @@
 # liminal_backrooms
 
-A Python-based application that enables dynamic, branching conversations between multiple AI models in a graphical user interface. Allows for forking and rabbitholing by selecting text and right clicking. The system supports various AI models including Claude, OpenAI, Gemini, Grok etc, allowing them to interact with each other through text and image generation.
+A Python-based application that enables dynamic conversations between multiple AI models in a graphical user interface. The system supports various AI models including Claude, OpenAI, Gemini, Grok etc, allowing them to interact with each other through text and image generation.
 
 Huge thanks to Andy Ayrey and Janus for their endless inspiration.
 
@@ -16,15 +16,6 @@ Huge thanks to Andy Ayrey and Janus for their endless inspiration.
     - Anything on openrouter - if it's not listed add in config.
   - Google Gemini 3 Pro Image Preview (via OpenRouter) for image generation (toggle in GUI)
   - OpenAI Sora 2 video generation (selectable as AI-2; videos saved to `videos/`)
-
-- Dynamic Conversation Branching:
-  - 🕳️ Rabbithole: Explore concepts in depth while retaining full context
-  - 🔱 Fork: Continue conversations from specific points in new directions
-  - Visual network graph showing conversation branches and connections
-  - Drag-and-drop node organization
-  - Automatic node spacing and collision avoidance
-  - Easy navigation between branches
-  - User can also interject at these points
 
 - Advanced Features:
   - Chain of Thought reasoning display optional
@@ -121,17 +112,7 @@ poetry run python main.py
    - Input Field: Enter your message or initial prompt
    - Export: Save conversation and generated images
 
-3. Branching Features:
-   - Right-click on any text to access branching options:
-     - 🕳️ Rabbithole: Explore a concept in depth
-     - 🔱 Fork: Continue from a specific point
-   - Click nodes in the network graph to navigate between branches
-   - Adjust iterations and models on the fly without restarting the application
-   - Drag nodes to organize your conversation map
-   - Branches automatically space themselves for clarity
-   - (Branching doesn't work very well with images in the GUI yet. The images disappear but will still be produced and can be found in the images folder.)
-
-4. Special Features:
+3. Special Features:
    - Chain of Thought: DeepSeek models show reasoning process
    - Image Generation: Google Gemini 3 Pro Image Preview creates images from prompts (via OpenRouter)
    - Export: Saves conversations and images with timestamps
@@ -175,11 +156,6 @@ This will run Sora in the background and save videos to `videos/` without using 
    - Ensure memory files exist in `memories/`
    - Check JSON formatting
    - Monitor file permissions
-
-4. Branching Issues:
-   - If nodes overlap, try dragging them apart
-   - If a branch seems stuck, try clicking propagate again
-   - Check console for any error messages
 
 ## Contributing
 

@@ -935,9 +935,9 @@ class ConversationManager:
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
-            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
-            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
-            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
+            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-1"]
+            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-2"]
+            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()
@@ -1284,8 +1284,8 @@ class ConversationManager:
         
         # Add node to network graph
         parent_node = parent_id if parent_id else 'main'
-        self.app.right_pane.add_node(branch_id, f'🐇 {selected_text[:15]}...', 'rabbithole')
-        self.app.right_pane.add_edge(parent_node, branch_id)
+        self.app.right_sidebar.add_node(branch_id, f'🐇 {selected_text[:15]}...', 'rabbithole')
+        self.app.right_sidebar.add_edge(parent_node, branch_id)
         
         # Process the branch conversation
         self.process_branch_input(selected_text)
@@ -1393,8 +1393,8 @@ class ConversationManager:
         
         # Add node to network graph
         parent_node = parent_id if parent_id else 'main'
-        self.app.right_pane.add_node(branch_id, f'🍴 {selected_text[:15]}...', 'fork')
-        self.app.right_pane.add_edge(parent_node, branch_id)
+        self.app.right_sidebar.add_node(branch_id, f'🍴 {selected_text[:15]}...', 'fork')
+        self.app.right_sidebar.add_edge(parent_node, branch_id)
         
         # Process the branch conversation with the proper instruction but mark it as hidden
         self.process_branch_input_with_hidden_instruction(fork_instruction)
@@ -1451,9 +1451,9 @@ class ConversationManager:
         else:
             # After initial exploration, revert to standard prompts
             print("Using standard prompts for continued conversation")
-            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
-            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_2"]
-            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_3"]
+            ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-1"]
+            ai_2_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-2"]
+            ai_3_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI-3"]
         
         # Start loading animation
         self.app.left_pane.start_loading()

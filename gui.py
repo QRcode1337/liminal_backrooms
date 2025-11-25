@@ -884,7 +884,6 @@ class RightSidebar(QWidget):
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
                 border-bottom: 2px solid {COLORS['accent_cyan']};
-                text-shadow: 0 0 8px {COLORS['shadow']};
             }}
         """
         
@@ -1329,7 +1328,6 @@ class ControlPanel(QWidget):
             QPushButton:hover {{
                 background-color: {accent_color};
                 color: {COLORS['bg_dark']};
-                box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['bg_light']};
@@ -1390,12 +1388,13 @@ class ConversationContextMenu(QMenu):
         self.fork_action = QAction("🔱 Fork", self)
         
         # Add actions to menu
-        self.addAction(self.rabbithole_action)
-        self.addAction(self.fork_action)
+        # NOTE: Fork/Rabbithole temporarily disabled - needs rebuild
+        # self.addAction(self.rabbithole_action)
+        # self.addAction(self.fork_action)
         
         # Connect actions to signals
-        self.rabbithole_action.triggered.connect(self.on_rabbithole_selected)
-        self.fork_action.triggered.connect(self.on_fork_selected)
+        # self.rabbithole_action.triggered.connect(self.on_rabbithole_selected)
+        # self.fork_action.triggered.connect(self.on_fork_selected)
         
         # Apply styling
         self.setStyleSheet("""
@@ -1552,7 +1551,6 @@ class ConversationPane(QWidget):
             }}
             QScrollBar::handle:vertical:hover {{
                 background: {COLORS['accent_cyan']};
-                box-shadow: 0 0 5px {COLORS['shadow']};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
@@ -1659,7 +1657,6 @@ class ConversationPane(QWidget):
             QPushButton:hover {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
-                box-shadow: 0 0 10px {COLORS['shadow']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['accent_cyan_active']};
@@ -1886,7 +1883,7 @@ class ConversationPane(QWidget):
             # Add image display if present
             image_html = ""
             if has_image and image_base64:
-                image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);" /></div>'
+                image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px;" /></div>'
             
             # Format based on role
             if role == 'user':
@@ -2048,7 +2045,6 @@ class ConversationPane(QWidget):
             QPushButton:hover {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
-                box-shadow: 0 0 10px {COLORS['shadow']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['accent_cyan_active']};
