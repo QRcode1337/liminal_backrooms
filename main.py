@@ -743,42 +743,50 @@ class ConversationManager:
             worker.signals.streaming_chunk.connect(self.on_streaming_chunk)
             worker.signals.error.connect(self.on_ai_error)
             
-            # Chain workers together
-            if i < num_ais:
+            workers.append(worker)
+        
+        # Chain workers together AFTER all are created (avoids closure issues)
+        for i, worker in enumerate(workers):
+            if i < len(workers) - 1:
                 # Not the last worker - connect to start next worker
-                next_index = i  # Capture index for lambda
+                next_worker = workers[i + 1]
+                ai_num = i + 2  # AI number for next worker (1-indexed, so i=0 means next is AI-2)
+                # Use a factory function to properly capture values
                 worker.signals.finished.connect(
-                    lambda conv=self.app.main_conversation, idx=next_index: self.start_next_ai_turn(conv, workers[idx], idx+1)
+                    self._make_next_turn_callback(next_worker, ai_num)
                 )
             else:
                 # Last worker - connect to handle turn completion
-                worker.signals.finished.connect(lambda: self.handle_turn_completion(max_iterations))
-            
-            workers.append(worker)
+                max_iter = max_iterations  # Capture the value
+                worker.signals.finished.connect(lambda mi=max_iter: self.handle_turn_completion(mi))
         
         # Start first AI's turn
         self.thread_pool.start(workers[0])
     
-    def start_next_ai_turn(self, conversation, worker, ai_number):
+    def _make_next_turn_callback(self, worker, ai_number):
+        """Factory function to create a callback for starting the next AI turn.
+        This avoids closure issues with lambdas in loops."""
+        def callback():
+            self.start_next_ai_turn(worker, ai_number)
+        return callback
+    
+    def start_next_ai_turn(self, worker, ai_number):
         """Start the next AI's turn in the conversation"""
-        # Make sure conversation is up to date with previous AI's response
+        # Get the latest conversation state
         if self.app.active_branch:
-            # Get the latest branch conversation with previous AI's response already included
             branch_id = self.app.active_branch
             branch_data = self.app.branch_conversations[branch_id]
             latest_conversation = branch_data['conversation']
         else:
-            # Get the latest main conversation with previous AI's response already included
             latest_conversation = self.app.main_conversation
         
         # Update worker's conversation reference to ensure it has the latest state
-        # This ensures any images generated from previous AI's response are included
         worker.conversation = latest_conversation.copy()
         
         # Add a small delay between turns
         time.sleep(TURN_DELAY)
         
-        # Start next AI's turn - the ai_turn function will properly format the context
+        # Start next AI's turn
         print(f"Starting AI-{ai_number}'s turn")
         self.thread_pool.start(worker)
     
@@ -1163,7 +1171,7 @@ class ConversationManager:
         prompt = text[:max_length].strip()
         
         # Add artistic direction to the prompt using the user's requested format
-        enhanced_prompt = f"Create an image using the following text as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
+        enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image using the following ai text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
         
         # Generate the image
         result = generate_image_from_text(enhanced_prompt)

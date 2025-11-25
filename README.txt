@@ -2,7 +2,6 @@
 
 A Python-based application that enables dynamic conversations between multiple AI models in a graphical user interface. The system supports various AI models including Claude, OpenAI, Gemini, Grok etc, allowing them to interact with each other through text and image generation.
 
-Huge thanks to Andy Ayrey and Janus for their endless inspiration.
 
 ## Features
 
@@ -152,10 +151,7 @@ This will run Sora in the background and save videos to `videos/` without using 
    - Check Python version compatibility
    - Verify display resolution settings
 
-3. Memory System:
-   - Ensure memory files exist in `memories/`
-   - Check JSON formatting
-   - Monitor file permissions
+
 
 ## Contributing
 
@@ -169,16 +165,7 @@ This will run Sora in the background and save videos to `videos/` without using 
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
 
-- Anthropic
-- DeepSeek AI
-- OpenRouter
-- OpenAI
-- Open-source contributors
-- Andy Ayrey and Janus, both huge inspirations for this project
 
-## Support
 
-For issues and feature requests, please use the GitHub issue tracker.
 
