@@ -1071,8 +1071,8 @@ class ControlPanel(QWidget):
         controls_layout.addWidget(num_ais_container)
         
         # AI-1 Model selection
-        ai1_container = QWidget()
-        ai1_layout = QVBoxLayout(ai1_container)
+        self.ai1_container = QWidget()
+        ai1_layout = QVBoxLayout(self.ai1_container)
         ai1_layout.setContentsMargins(0, 0, 0, 0)
         ai1_layout.setSpacing(5)
         
@@ -1083,11 +1083,11 @@ class ControlPanel(QWidget):
         self.ai1_model_selector = QComboBox()
         self.ai1_model_selector.setStyleSheet(self.get_combobox_style())
         ai1_layout.addWidget(self.ai1_model_selector)
-        controls_layout.addWidget(ai1_container)
+        controls_layout.addWidget(self.ai1_container)
         
         # AI-2 Model selection
-        ai2_container = QWidget()
-        ai2_layout = QVBoxLayout(ai2_container)
+        self.ai2_container = QWidget()
+        ai2_layout = QVBoxLayout(self.ai2_container)
         ai2_layout.setContentsMargins(0, 0, 0, 0)
         ai2_layout.setSpacing(5)
         
@@ -1098,11 +1098,11 @@ class ControlPanel(QWidget):
         self.ai2_model_selector = QComboBox()
         self.ai2_model_selector.setStyleSheet(self.get_combobox_style())
         ai2_layout.addWidget(self.ai2_model_selector)
-        controls_layout.addWidget(ai2_container)
+        controls_layout.addWidget(self.ai2_container)
         
         # AI-3 Model selection
-        ai3_container = QWidget()
-        ai3_layout = QVBoxLayout(ai3_container)
+        self.ai3_container = QWidget()
+        ai3_layout = QVBoxLayout(self.ai3_container)
         ai3_layout.setContentsMargins(0, 0, 0, 0)
         ai3_layout.setSpacing(5)
         
@@ -1113,7 +1113,7 @@ class ControlPanel(QWidget):
         self.ai3_model_selector = QComboBox()
         self.ai3_model_selector.setStyleSheet(self.get_combobox_style())
         ai3_layout.addWidget(self.ai3_model_selector)
-        controls_layout.addWidget(ai3_container)
+        controls_layout.addWidget(self.ai3_container)
         
         # AI-4 Model selection
         self.ai4_container = QWidget()
