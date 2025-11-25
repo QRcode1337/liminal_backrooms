@@ -1227,6 +1227,7 @@ class ControlPanel(QWidget):
         # Add all controls directly to controls_layout (now vertical)
         controls_layout.addWidget(mode_container)
         controls_layout.addWidget(iterations_container)
+        controls_layout.addWidget(num_ais_container)
         
         # Divider
         divider1 = QLabel("─" * 20)
@@ -1237,9 +1238,11 @@ class ControlPanel(QWidget):
         models_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         controls_layout.addWidget(models_label)
         
-        controls_layout.addWidget(ai1_container)
-        controls_layout.addWidget(ai2_container)
-        controls_layout.addWidget(ai3_container)
+        controls_layout.addWidget(self.ai1_container)
+        controls_layout.addWidget(self.ai2_container)
+        controls_layout.addWidget(self.ai3_container)
+        controls_layout.addWidget(self.ai4_container)
+        controls_layout.addWidget(self.ai5_container)
         
         # Divider
         divider2 = QLabel("─" * 20)
