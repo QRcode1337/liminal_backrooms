@@ -31,27 +31,46 @@ from config import (
 # Add import for the HTML viewing functionality 
 from shared_utils import open_html_in_browser, generate_image_from_text
 
-# Define global color palette for consistent styling
+# Define global color palette for consistent styling - Cyberpunk theme
 COLORS = {
-    'bg_dark': '#1E1E1E',           # Main background
-    'bg_medium': '#252526',         # Widget backgrounds
-    'bg_light': '#2D2D30',          # Lighter elements
-    'accent_blue': '#569CD6',       # Primary accent
-    'accent_blue_hover': '#4E8CC2', # Hover state
-    'accent_blue_active': '#007ACC',# Active state
-    'accent_green': '#B5CEA8',      # Secondary accent (rabbithole)
-    'accent_yellow': '#DCDCAA',     # Tertiary accent (fork)
-    'accent_orange': '#CE9178',     # Quaternary accent
-    'text_normal': '#D4D4D4',       # Normal text
-    'text_dim': '#9CDCFE',          # Dimmed text
-    'text_bright': '#FFFFFF',       # Bright text
-    'text_error': '#F44747',        # Error text
-    'border': '#3E3E42',            # Borders
-    'border_highlight': '#555555',  # Highlighted borders
-    'chain_of_thought': '#608B4E',  # Chain of thought text
-    'user_header': '#4EC9B0',       # User message headers
-    'ai_header': '#569CD6',         # AI message headers
-    'system_message': '#CE9178',    # System messages
+    # Backgrounds - darker, moodier
+    'bg_dark': '#0A0E1A',           # Deep blue-black
+    'bg_medium': '#111827',         # Slate dark
+    'bg_light': '#1E293B',          # Lighter slate
+    
+    # Primary accents - neon but muted
+    'accent_cyan': '#06B6D4',       # Cyan (primary)
+    'accent_cyan_hover': '#0891B2',
+    'accent_cyan_active': '#0E7490',
+    
+    # Secondary accents
+    'accent_pink': '#EC4899',       # Hot pink (secondary)
+    'accent_purple': '#A855F7',     # Purple (tertiary)
+    'accent_yellow': '#FBBF24',     # Amber for warnings
+    'accent_green': '#10B981',      # Emerald (rabbithole)
+    
+    # Text colors
+    'text_normal': '#CBD5E1',       # Slate-200
+    'text_dim': '#64748B',          # Slate-500
+    'text_bright': '#F1F5F9',       # Slate-50
+    'text_glow': '#38BDF8',         # Sky-400 (glowing text)
+    'text_error': '#EF4444',        # Red-500
+    
+    # Borders and effects
+    'border': '#1E293B',            # Slate-800
+    'border_glow': '#06B6D4',       # Glowing cyan borders
+    'border_highlight': '#334155',  # Slate-700
+    'shadow': 'rgba(6, 182, 212, 0.2)',  # Cyan glow shadows
+    
+    # Legacy color mappings for compatibility
+    'accent_blue': '#06B6D4',       # Map old blue to cyan
+    'accent_blue_hover': '#0891B2',
+    'accent_blue_active': '#0E7490',
+    'accent_orange': '#F59E0B',     # Amber-500
+    'chain_of_thought': '#10B981',  # Emerald
+    'user_header': '#06B6D4',       # Cyan
+    'ai_header': '#A855F7',         # Purple
+    'system_message': '#F59E0B',    # Amber
 }
 
 # Load custom fonts
@@ -813,6 +832,122 @@ class NetworkPane(QWidget):
             # Redraw
             self.network_view.update()
 
+class RightSidebar(QWidget):
+    """Right sidebar with tabbed interface for Setup and Network Graph"""
+    nodeSelected = pyqtSignal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.setMinimumWidth(300)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Set up the tabbed sidebar interface"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(0)
+        
+        # Create tab bar at the top (custom styled)
+        tab_container = QWidget()
+        tab_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-bottom: 1px solid {COLORS['border_glow']};
+            }}
+        """)
+        tab_layout = QHBoxLayout(tab_container)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+        
+        # Tab buttons
+        self.setup_button = QPushButton("⚙ SETUP")
+        self.graph_button = QPushButton("🌐 GRAPH")
+        
+        # Cyberpunk tab button styling
+        tab_style = f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                border: none;
+                border-bottom: 2px solid transparent;
+                padding: 12px 20px;
+                font-weight: bold;
+                font-size: 11px;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_normal']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['accent_cyan']};
+                border-bottom: 2px solid {COLORS['accent_cyan']};
+                text-shadow: 0 0 8px {COLORS['shadow']};
+            }}
+        """
+        
+        self.setup_button.setStyleSheet(tab_style)
+        self.graph_button.setStyleSheet(tab_style)
+        
+        # Make buttons checkable for tab behavior
+        self.setup_button.setCheckable(True)
+        self.graph_button.setCheckable(True)
+        self.setup_button.setChecked(True)  # Start with setup tab active
+        
+        # Connect tab buttons
+        self.setup_button.clicked.connect(lambda: self.switch_tab(0))
+        self.graph_button.clicked.connect(lambda: self.switch_tab(1))
+        
+        tab_layout.addWidget(self.setup_button)
+        tab_layout.addWidget(self.graph_button)
+        
+        layout.addWidget(tab_container)
+        
+        # Create stacked widget for tab content
+        from PyQt6.QtWidgets import QStackedWidget
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet(f"""
+            QStackedWidget {{
+                background-color: {COLORS['bg_dark']};
+                border: none;
+            }}
+        """)
+        
+        # Create tab pages
+        self.control_panel = ControlPanel()
+        self.network_pane = NetworkPane()
+        
+        # Add pages to stack
+        self.stack.addWidget(self.control_panel)
+        self.stack.addWidget(self.network_pane)
+        
+        layout.addWidget(self.stack, 1)  # Stretch to fill
+        
+        # Connect network pane signal to forward it
+        self.network_pane.nodeSelected.connect(self.nodeSelected)
+    
+    def switch_tab(self, index):
+        """Switch between tabs"""
+        self.stack.setCurrentIndex(index)
+        
+        # Update button states
+        self.setup_button.setChecked(index == 0)
+        self.graph_button.setChecked(index == 1)
+    
+    def add_node(self, node_id, label, node_type):
+        """Forward to network pane"""
+        self.network_pane.add_node(node_id, label, node_type)
+    
+    def add_edge(self, source_id, target_id):
+        """Forward to network pane"""
+        self.network_pane.add_edge(source_id, target_id)
+    
+    def update_graph(self):
+        """Forward to network pane"""
+        self.network_pane.update_graph()
+
 class ControlPanel(QWidget):
     """Control panel with mode, model selections, etc."""
     def __init__(self):
@@ -825,30 +960,66 @@ class ControlPanel(QWidget):
         self.initialize_selectors()
     
     def setup_ui(self):
-        """Set up the user interface for the control panel"""
+        """Set up the user interface for the control panel - vertical sidebar layout"""
         # Main layout
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 10, 0, 0)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(8)
         
-        # Add a title
-        title = QLabel("Control Panel")
+        # Add a title with cyberpunk styling
+        title = QLabel("═ CONTROL PANEL ═")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
-            color: {COLORS['text_bright']};
-            font-size: 14px;
+            color: {COLORS['accent_cyan']};
+            font-size: 12px;
             font-weight: bold;
-            padding-bottom: 5px;
-            border-bottom: 1px solid {COLORS['border']};
+            padding: 10px;
+            background-color: {COLORS['bg_medium']};
+            border: 1px solid {COLORS['border_glow']};
+            border-radius: 0px;
+            letter-spacing: 2px;
         """)
         main_layout.addWidget(title)
         
-        # Create a grid layout for the controls
-        controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(15)
+        # Create scrollable area for controls
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: {COLORS['bg_medium']};
+                width: 10px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {COLORS['border_glow']};
+                min-height: 20px;
+                border-radius: 0px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {COLORS['accent_cyan']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
         
-        # Left column - Mode and iterations
-        left_column = QVBoxLayout()
-        left_column.setSpacing(10)
+        # Container widget for scrollable content
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet(f"background-color: transparent;")
+        
+        # All controls in vertical layout
+        controls_layout = QVBoxLayout(scroll_content)
+        controls_layout.setContentsMargins(5, 5, 5, 5)
+        controls_layout.setSpacing(10)
         
         # Mode selection with icon
         mode_container = QWidget()
@@ -856,16 +1027,15 @@ class ControlPanel(QWidget):
         mode_layout.setContentsMargins(0, 0, 0, 0)
         mode_layout.setSpacing(5)
         
-        mode_label = QLabel("Conversation Mode")
-        mode_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        mode_label = QLabel("▸ MODE")
+        mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         mode_layout.addWidget(mode_label)
         
         self.mode_selector = QComboBox()
         self.mode_selector.addItems(["AI-AI", "Human-AI"])
         self.mode_selector.setStyleSheet(self.get_combobox_style())
         mode_layout.addWidget(self.mode_selector)
-        
-        left_column.addWidget(mode_container)
+        controls_layout.addWidget(mode_container)
         
         # Iterations with slider
         iterations_container = QWidget()
@@ -873,20 +1043,15 @@ class ControlPanel(QWidget):
         iterations_layout.setContentsMargins(0, 0, 0, 0)
         iterations_layout.setSpacing(5)
         
-        iterations_label = QLabel("Iterations")
-        iterations_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        iterations_label = QLabel("▸ ITERATIONS")
+        iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         iterations_layout.addWidget(iterations_label)
         
         self.iterations_selector = QComboBox()
         self.iterations_selector.addItems(["1", "2", "4", "6", "12", "100"])
         self.iterations_selector.setStyleSheet(self.get_combobox_style())
         iterations_layout.addWidget(self.iterations_selector)
-        
-        left_column.addWidget(iterations_container)
-        
-        # Middle column - AI models
-        middle_column = QVBoxLayout()
-        middle_column.setSpacing(10)
+        controls_layout.addWidget(iterations_container)
         
         # AI-1 Model selection
         ai1_container = QWidget()
@@ -894,15 +1059,14 @@ class ControlPanel(QWidget):
         ai1_layout.setContentsMargins(0, 0, 0, 0)
         ai1_layout.setSpacing(5)
         
-        ai1_label = QLabel("AI-1 Model")
-        ai1_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        ai1_label = QLabel("AI-1")
+        ai1_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai1_layout.addWidget(ai1_label)
         
         self.ai1_model_selector = QComboBox()
         self.ai1_model_selector.setStyleSheet(self.get_combobox_style())
         ai1_layout.addWidget(self.ai1_model_selector)
-        
-        middle_column.addWidget(ai1_container)
+        controls_layout.addWidget(ai1_container)
         
         # AI-2 Model selection
         ai2_container = QWidget()
@@ -910,15 +1074,14 @@ class ControlPanel(QWidget):
         ai2_layout.setContentsMargins(0, 0, 0, 0)
         ai2_layout.setSpacing(5)
         
-        ai2_label = QLabel("AI-2 Model")
-        ai2_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        ai2_label = QLabel("AI-2")
+        ai2_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai2_layout.addWidget(ai2_label)
         
         self.ai2_model_selector = QComboBox()
         self.ai2_model_selector.setStyleSheet(self.get_combobox_style())
         ai2_layout.addWidget(self.ai2_model_selector)
-        
-        middle_column.addWidget(ai2_container)
+        controls_layout.addWidget(ai2_container)
         
         # AI-3 Model selection
         ai3_container = QWidget()
@@ -926,19 +1089,14 @@ class ControlPanel(QWidget):
         ai3_layout.setContentsMargins(0, 0, 0, 0)
         ai3_layout.setSpacing(5)
         
-        ai3_label = QLabel("AI-3 Model")
-        ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        ai3_label = QLabel("AI-3")
+        ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         ai3_layout.addWidget(ai3_label)
         
         self.ai3_model_selector = QComboBox()
         self.ai3_model_selector.setStyleSheet(self.get_combobox_style())
         ai3_layout.addWidget(self.ai3_model_selector)
-        
-        middle_column.addWidget(ai3_container)
-        
-        # Right column - Prompt pair and export
-        right_column = QVBoxLayout()
-        right_column.setSpacing(10)
+        controls_layout.addWidget(ai3_container)
         
         # Prompt pair selection
         prompt_container = QWidget()
@@ -947,14 +1105,13 @@ class ControlPanel(QWidget):
         prompt_layout.setSpacing(5)
         
         prompt_label = QLabel("Conversation Scenario")
-        prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        prompt_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
         prompt_layout.addWidget(prompt_label)
         
         self.prompt_pair_selector = QComboBox()
         self.prompt_pair_selector.setStyleSheet(self.get_combobox_style())
         prompt_layout.addWidget(self.prompt_pair_selector)
-        
-        right_column.addWidget(prompt_container)
+        controls_layout.addWidget(prompt_container)
         
         # Action buttons container
         action_container = QWidget()
@@ -962,8 +1119,8 @@ class ControlPanel(QWidget):
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(5)
         
-        action_label = QLabel("Actions")
-        action_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+        action_label = QLabel("▸ OPTIONS")
+        action_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         action_layout.addWidget(action_label)
         
         # Auto-generate images checkbox
@@ -972,17 +1129,22 @@ class ControlPanel(QWidget):
             QCheckBox {{
                 color: {COLORS['text_normal']};
                 spacing: 5px;
+                font-size: 10px;
+                padding: 4px;
             }}
             QCheckBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border: 1px solid {COLORS['border']};
-                border-radius: 3px;
-                background-color: {COLORS['bg_light']};
+                width: 18px;
+                height: 18px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                background-color: {COLORS['bg_medium']};
             }}
             QCheckBox::indicator:checked {{
-                background-color: {COLORS['accent_blue']};
-                border: 1px solid {COLORS['accent_blue']};
+                background-color: {COLORS['accent_cyan']};
+                border: 1px solid {COLORS['accent_cyan']};
+            }}
+            QCheckBox::indicator:hover {{
+                border: 1px solid {COLORS['accent_cyan']};
             }}
         """)
         self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
@@ -990,116 +1152,95 @@ class ControlPanel(QWidget):
         
         # Removed: HTML contributions checkbox
         
-        # Buttons layout (horizontal)
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(5)
+        # Actions - buttons in vertical layout
+        actions_label = QLabel("▸ ACTIONS")
+        actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        action_layout.addWidget(actions_label)
         
         # Export button
-        self.export_button = QPushButton("Export")
-        self.export_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 8px 15px;
-                font-weight: bold;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['border']};
-                border: 1px solid {COLORS['border_highlight']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['border_highlight']};
-            }}
-        """)
+        self.export_button = QPushButton("📡 EXPORT")
+        self.export_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_purple']))
+        action_layout.addWidget(self.export_button)
         
-        # View HTML button (removed)
-        self.view_html_button = QPushButton("View HTML")
-        self.view_html_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['accent_green']};
-                color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 8px 15px;
-                font-weight: bold;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['accent_blue']};
-                color: {COLORS['text_bright']};
-                border: 1px solid {COLORS['border_highlight']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['accent_blue_active']};
-            }}
-        """)
+        # View HTML button
+        self.view_html_button = QPushButton("🌐 VIEW HTML")
+        self.view_html_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_green']))
         self.view_html_button.clicked.connect(lambda: open_html_in_browser("shared_document.html"))
+        action_layout.addWidget(self.view_html_button)
         
         # View Full HTML button
-        self.view_full_html_button = QPushButton("View Dark HTML")
-        self.view_full_html_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #212121;
-                color: #789922;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 8px 15px;
-                font-weight: bold;
-                text-align: center;
-            }}
-            QPushButton:hover {{
-                background-color: #2d2d2d;
-                color: #98c379;
-                border: 1px solid #555;
-            }}
-            QPushButton:pressed {{
-                background-color: #1a1a1a;
-            }}
-        """)
-        self.view_full_html_button.setToolTip("View the full conversation in dark mode with greentext styling")
+        self.view_full_html_button = QPushButton("🌐 FULL HTML")
+        self.view_full_html_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_yellow']))
+        self.view_full_html_button.setToolTip("View the full conversation in dark mode")
         self.view_full_html_button.clicked.connect(lambda: open_html_in_browser("conversation_full.html"))
+        action_layout.addWidget(self.view_full_html_button)
         
-        # Removed: View Living Document button
+        controls_layout.addWidget(action_container)
         
-        # Add buttons to layout
-        buttons_layout.addWidget(self.export_button)
-        buttons_layout.addWidget(self.view_html_button)
-        buttons_layout.addWidget(self.view_full_html_button)
-        # Removed: living doc button from layout
+        # Add all controls directly to controls_layout (now vertical)
+        controls_layout.addWidget(mode_container)
+        controls_layout.addWidget(iterations_container)
         
-        action_layout.addLayout(buttons_layout)
+        # Divider
+        divider1 = QLabel("─" * 20)
+        divider1.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        controls_layout.addWidget(divider1)
         
-        right_column.addWidget(action_container)
+        models_label = QLabel("▸ AI MODELS")
+        models_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        controls_layout.addWidget(models_label)
         
-        # Add columns to the controls layout
-        controls_layout.addLayout(left_column, 1)
-        controls_layout.addLayout(middle_column, 1)
-        controls_layout.addLayout(right_column, 1)
+        controls_layout.addWidget(ai1_container)
+        controls_layout.addWidget(ai2_container)
+        controls_layout.addWidget(ai3_container)
         
-        # Add controls layout to main layout
-        main_layout.addLayout(controls_layout)
+        # Divider
+        divider2 = QLabel("─" * 20)
+        divider2.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        controls_layout.addWidget(divider2)
+        
+        scenario_label = QLabel("▸ SCENARIO")
+        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        controls_layout.addWidget(scenario_label)
+        
+        controls_layout.addWidget(prompt_container)
+        
+        # Divider
+        divider3 = QLabel("─" * 20)
+        divider3.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        controls_layout.addWidget(divider3)
+        
+        controls_layout.addWidget(action_container)
+        
+        # Add spacer
+        controls_layout.addStretch()
+        
+        # Set the scroll area widget and add to main layout
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)  # Stretch to fill
     
     def get_combobox_style(self):
-        """Get the style for comboboxes"""
+        """Get the style for comboboxes - cyberpunk themed"""
         return f"""
             QComboBox {{
-                background-color: {COLORS['bg_light']};
+                background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 5px 10px;
-                min-width: 150px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 8px 10px;
+                min-height: 30px;
+                font-size: 10px;
+            }}
+            QComboBox:hover {{
+                border: 1px solid {COLORS['accent_cyan']};
+                color: {COLORS['text_bright']};
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 20px;
-                border-left: 1px solid {COLORS['border']};
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
+                border-left: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
             }}
             QComboBox::down-arrow {{
                 width: 12px;
@@ -1107,12 +1248,42 @@ class ControlPanel(QWidget):
                 image: none;
             }}
             QComboBox QAbstractItemView {{
-                background-color: {COLORS['bg_medium']};
+                background-color: {COLORS['bg_dark']};
                 color: {COLORS['text_normal']};
-                selection-background-color: {COLORS['accent_blue']};
-                selection-color: {COLORS['text_bright']};
-                border: 1px solid {COLORS['border']};
+                selection-background-color: {COLORS['accent_cyan']};
+                selection-color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['border_glow']};
                 border-radius: 0px;
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 28px;
+                padding: 4px;
+            }}
+        """
+    
+    def get_cyberpunk_button_style(self, accent_color):
+        """Get cyberpunk-themed button style with given accent color"""
+        return f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {accent_color};
+                border: 1px solid {accent_color};
+                border-radius: 2px;
+                padding: 8px 12px;
+                font-weight: bold;
+                font-size: 10px;
+                letter-spacing: 1px;
+                text-align: center;
+            }}
+            QPushButton:hover {{
+                background-color: {accent_color};
+                color: {COLORS['bg_dark']};
+                box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['bg_light']};
+                color: {accent_color};
             }}
         """
     
@@ -1247,19 +1418,21 @@ class ConversationPane(QWidget):
         
         # Title and info area
         title_layout = QHBoxLayout()
-        self.title_label = QLabel("Liminal Backrooms")
+        self.title_label = QLabel("╔═ LIMINAL BACKROOMS ═╗")
         self.title_label.setStyleSheet(f"""
-            color: {COLORS['text_bright']};
+            color: {COLORS['accent_cyan']};
             font-size: 14px;
             font-weight: bold;
-            padding: 2px;
+            padding: 4px;
+            letter-spacing: 2px;
         """)
         
-        self.info_label = QLabel("AI-to-AI conversation")
+        self.info_label = QLabel("[ AI-TO-AI PROPAGATION ]")
         self.info_label.setStyleSheet(f"""
-            color: {COLORS['text_dim']};
-            font-size: 11px;
+            color: {COLORS['text_glow']};
+            font-size: 10px;
             padding: 2px;
+            letter-spacing: 1px;
         """)
         
         title_layout.addWidget(self.title_label)
@@ -1280,29 +1453,30 @@ class ConversationPane(QWidget):
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.conversation_display.setFont(font)
         
-        # Apply modern styling
+        # Apply cyberpunk styling
         self.conversation_display.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {COLORS['bg_medium']};
+                background-color: {COLORS['bg_dark']};
                 color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 10px;
-                selection-background-color: {COLORS['accent_blue']};
-                selection-color: {COLORS['text_bright']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 15px;
+                selection-background-color: {COLORS['accent_cyan']};
+                selection-color: {COLORS['bg_dark']};
             }}
             QScrollBar:vertical {{
                 background: {COLORS['bg_medium']};
-                width: 12px;
+                width: 10px;
                 margin: 0px;
             }}
             QScrollBar::handle:vertical {{
-                background: {COLORS['border']};
+                background: {COLORS['border_glow']};
                 min-height: 20px;
-                border-radius: 4px;
+                border-radius: 0px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background: {COLORS['border_highlight']};
+                background: {COLORS['accent_cyan']};
+                box-shadow: 0 0 5px {COLORS['shadow']};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
@@ -1329,13 +1503,13 @@ class ConversationPane(QWidget):
         self.input_field.setFont(font)
         self.input_field.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {COLORS['bg_light']};
+                background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
                 padding: 8px;
-                selection-background-color: {COLORS['accent_blue']};
-                selection-color: {COLORS['text_bright']};
+                selection-background-color: {COLORS['accent_cyan']};
+                selection-color: {COLORS['bg_dark']};
             }}
         """)
         input_layout.addWidget(self.input_field)
@@ -1347,69 +1521,78 @@ class ConversationPane(QWidget):
         button_layout.setSpacing(5)  # Reduced spacing
         
         # Upload image button
-        self.upload_image_button = QPushButton("📎 Image")
+        self.upload_image_button = QPushButton("📎 IMAGE")
         self.upload_image_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['bg_light']};
+                background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 4px 10px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 6px 10px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
+                letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['border']};
-                border: 1px solid {COLORS['border_highlight']};
+                background-color: {COLORS['bg_light']};
+                border: 1px solid {COLORS['accent_cyan']};
+                color: {COLORS['accent_cyan']};
             }}
             QPushButton:pressed {{
-                background-color: {COLORS['border_highlight']};
+                background-color: {COLORS['border_glow']};
             }}
         """)
         self.upload_image_button.setToolTip("Upload an image to include in your message")
         
         # Clear button
-        self.clear_button = QPushButton("Clear")
+        self.clear_button = QPushButton("CLEAR")
         self.clear_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['bg_light']};
+                background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 4px 10px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 6px 10px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
+                letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['border']};
-                border: 1px solid {COLORS['border_highlight']};
+                background-color: {COLORS['bg_light']};
+                border: 1px solid {COLORS['accent_pink']};
+                color: {COLORS['accent_pink']};
             }}
             QPushButton:pressed {{
-                background-color: {COLORS['border_highlight']};
+                background-color: {COLORS['border_glow']};
             }}
         """)
         
-        # Submit button with modern styling
-        self.submit_button = QPushButton("Propagate")
+        # Submit button with cyberpunk styling
+        self.submit_button = QPushButton("⚡ PROPAGATE")
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['accent_blue']};
-                color: {COLORS['text_bright']};
-                border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['accent_cyan']};
+                border-radius: 0px;
+                padding: 6px 16px;
                 font-weight: bold;
                 font-size: 11px;
+                letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['accent_blue_hover']};
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['accent_cyan']};
+                box-shadow: 0 0 10px {COLORS['shadow']};
             }}
             QPushButton:pressed {{
-                background-color: {COLORS['accent_blue_active']};
+                background-color: {COLORS['accent_cyan_active']};
+                color: {COLORS['text_bright']};
             }}
             QPushButton:disabled {{
                 background-color: {COLORS['border']};
                 color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
             }}
         """)
         
@@ -1422,13 +1605,9 @@ class ConversationPane(QWidget):
         # Add input container to main layout
         input_layout.addWidget(button_container)
         
-        # Control panel (buttons for various actions)
-        self.control_panel = ControlPanel()
-        
         # Add widgets to layout with adjusted stretch factors
         layout.addWidget(self.conversation_display, 1)  # Main conversation area gets most space
         layout.addWidget(input_container, 0)  # Input area gets minimal space
-        layout.addWidget(self.control_panel, 0)  # Control panel gets minimal space
     
     def connect_signals(self):
         """Connect signals and slots"""
@@ -1781,19 +1960,23 @@ class ConversationPane(QWidget):
         # Reset button style
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['accent_blue']};
-                color: {COLORS['text_bright']};
-                border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['accent_cyan']};
+                border-radius: 0px;
+                padding: 6px 16px;
                 font-weight: bold;
                 font-size: 11px;
+                letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['accent_blue_hover']};
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['accent_cyan']};
+                box-shadow: 0 0 10px {COLORS['shadow']};
             }}
             QPushButton:pressed {{
-                background-color: {COLORS['accent_blue_active']};
+                background-color: {COLORS['accent_cyan_active']};
+                color: {COLORS['text_bright']};
             }}
         """)
     
@@ -2037,7 +2220,7 @@ class LiminalBackroomsApp(QMainWindow):
     
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("Liminal Backrooms v0.7")
+        self.setWindowTitle("╔═ LIMINAL BACKROOMS v0.7 ═╗")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
         
@@ -2066,19 +2249,19 @@ class LiminalBackroomsApp(QMainWindow):
         """)
         main_layout.addWidget(self.splitter)
         
-        # Create left pane (conversation) and right pane (network view)
+        # Create left pane (conversation) and right sidebar (tabbed: setup + network)
         self.left_pane = ConversationPane()
-        self.right_pane = NetworkPane()
+        self.right_sidebar = RightSidebar()
         
         self.splitter.addWidget(self.left_pane)
-        self.splitter.addWidget(self.right_pane)
+        self.splitter.addWidget(self.right_sidebar)
         
-        # Set initial splitter sizes (65:35 ratio for more space for the network)
+        # Set initial splitter sizes (70:30 ratio - more space for conversation)
         total_width = 1600  # Based on default window width
-        self.splitter.setSizes([int(total_width * 0.65), int(total_width * 0.35)])
+        self.splitter.setSizes([int(total_width * 0.70), int(total_width * 0.30)])
         
         # Initialize main conversation as root node
-        self.right_pane.add_node('main', 'Seed', 'main')
+        self.right_sidebar.add_node('main', 'Seed', 'main')
         
         # Status bar with modern styling
         self.statusBar().setStyleSheet(f"""
@@ -2098,14 +2281,14 @@ class LiminalBackroomsApp(QMainWindow):
     def connect_signals(self):
         """Connect all signals and slots"""
         # Node selection in network view
-        self.right_pane.nodeSelected.connect(self.on_branch_select)
+        self.right_sidebar.nodeSelected.connect(self.on_branch_select)
         
         # Node hover in network view
-        if hasattr(self.right_pane.network_view, 'nodeHovered'):
-            self.right_pane.network_view.nodeHovered.connect(self.on_node_hover)
+        if hasattr(self.right_sidebar.network_pane.network_view, 'nodeHovered'):
+            self.right_sidebar.network_pane.network_view.nodeHovered.connect(self.on_node_hover)
         
         # Export button
-        self.left_pane.control_panel.export_button.clicked.connect(self.export_conversation)
+        self.right_sidebar.control_panel.export_button.clicked.connect(self.export_conversation)
         
         # Connect context menu actions to the main app methods
         self.left_pane.set_rabbithole_callback(self.branch_from_selection)
@@ -2314,8 +2497,8 @@ class LiminalBackroomsApp(QMainWindow):
             
             # Add node to network graph - make sure parameters are in the correct order
             node_label = f"{branch_type.capitalize()}: {selected_text[:20]}{'...' if len(selected_text) > 20 else ''}"
-            self.right_pane.add_node(branch_id, node_label, branch_type)
-            self.right_pane.add_edge(parent_id, branch_id)
+            self.right_sidebar.add_node(branch_id, node_label, branch_type)
+            self.right_sidebar.add_edge(parent_id, branch_id)
             
             # Set active branch to this new branch
             self.active_branch = branch_id

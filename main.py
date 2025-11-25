@@ -707,12 +707,12 @@ class ConversationManager:
             self.update_conversation_html(self.app.main_conversation)
         
         # Get selected models from UI
-        ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
+        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
+        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
         
         # Get selected prompt pair
-        selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
+        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
         
         # Get system prompts from the selected pair
         ai_1_prompt = SYSTEM_PROMPT_PAIRS[selected_prompt_pair]["AI_1"]
@@ -723,7 +723,7 @@ class ConversationManager:
         self.app.left_pane.start_loading()
         
         # Reset turn count ONLY if this is a new conversation or explicit user input
-        max_iterations = int(self.app.left_pane.control_panel.iterations_selector.currentText())
+        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         if user_input is not None or not self.app.main_conversation:
             self.app.turn_count = 0
             print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations")
@@ -939,10 +939,10 @@ class ConversationManager:
             self.update_conversation_html(conversation)
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
-        selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
+        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
+        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
+        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
         has_ai_responses = False
@@ -977,7 +977,7 @@ class ConversationManager:
             print("Resetting turn count - starting new conversation")
         
         # Get max iterations
-        max_iterations = int(self.app.left_pane.control_panel.iterations_selector.currentText())
+        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         
         # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
@@ -1087,7 +1087,7 @@ class ConversationManager:
         if isinstance(result, dict) and "content" in result and not "image_url" in result:
             response_content = result.get("content", "")
             if response_content and len(response_content.strip()) > 20:
-                if hasattr(self.app.left_pane.control_panel, 'auto_image_checkbox') and self.app.left_pane.control_panel.auto_image_checkbox.isChecked():
+                if hasattr(self.app.right_sidebar.control_panel, 'auto_image_checkbox') and self.app.right_sidebar.control_panel.auto_image_checkbox.isChecked():
                     self.app.left_pane.append_text("\nGenerating an image based on this response...\n", "system")
                     self.generate_and_display_image(response_content, ai_name)
         
@@ -1166,7 +1166,7 @@ class ConversationManager:
         prompt = text[:max_length].strip()
         
         # Add artistic direction to the prompt using the user's requested format
-        enhanced_prompt = f"Create an image using the following text as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form. HIghly detailed{prompt}"
+        enhanced_prompt = f"Create an image using the following text as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
         
         # Generate the image
         result = generate_image_from_text(enhanced_prompt)
@@ -1210,11 +1210,11 @@ class ConversationManager:
     def get_model_for_ai(self, ai_name):
         """Get the selected model name for the AI"""
         if ai_name == "AI-1":
-            return self.app.left_pane.control_panel.ai1_model_selector.currentText()
+            return self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
         elif ai_name == "AI-2":
-            return self.app.left_pane.control_panel.ai2_model_selector.currentText()
+            return self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
         elif ai_name == "AI-3":
-            return self.app.left_pane.control_panel.ai3_model_selector.currentText()
+            return self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
         return ""
     
     def on_ai_error(self, error_message):
@@ -1447,10 +1447,10 @@ class ConversationManager:
             # No need to update display since message is hidden
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.left_pane.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.left_pane.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.left_pane.control_panel.ai3_model_selector.currentText()
-        selected_prompt_pair = self.app.left_pane.control_panel.prompt_pair_selector.currentText()
+        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
+        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
+        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
+        selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
         has_ai_responses = False
@@ -1488,7 +1488,7 @@ class ConversationManager:
             print("Resetting turn count - starting new conversation")
         
         # Get max iterations
-        max_iterations = int(self.app.left_pane.control_panel.iterations_selector.currentText())
+        max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         
         # Create worker threads for AI-1, AI-2, and AI-3
         worker1 = Worker("AI-1", conversation, ai_1_model, ai_1_prompt, is_branch=True, branch_id=branch_id, gui=self.app)
