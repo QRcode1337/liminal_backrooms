@@ -20,7 +20,7 @@ import webbrowser
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
-from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect
 
 from config import (
     AI_MODELS,
@@ -73,6 +73,47 @@ COLORS = {
     'system_message': '#F59E0B',    # Amber
 }
 
+
+def apply_glow_effect(widget, color, blur_radius=15, offset=(0, 2)):
+    """Apply a glowing drop shadow effect to a widget"""
+    shadow = QGraphicsDropShadowEffect()
+    shadow.setBlurRadius(blur_radius)
+    shadow.setColor(QColor(color))
+    shadow.setOffset(offset[0], offset[1])
+    widget.setGraphicsEffect(shadow)
+    return shadow
+
+
+class GlowButton(QPushButton):
+    """Enhanced button with glow effect on hover"""
+    
+    def __init__(self, text, glow_color=COLORS['accent_cyan'], parent=None):
+        super().__init__(text, parent)
+        self.glow_color = glow_color
+        self.base_blur = 8
+        self.hover_blur = 20
+        
+        # Create shadow effect
+        self.shadow = QGraphicsDropShadowEffect()
+        self.shadow.setBlurRadius(self.base_blur)
+        self.shadow.setColor(QColor(glow_color))
+        self.shadow.setOffset(0, 2)
+        self.setGraphicsEffect(self.shadow)
+        
+        # Track hover state for animation
+        self.setMouseTracking(True)
+    
+    def enterEvent(self, event):
+        """Increase glow on hover"""
+        self.shadow.setBlurRadius(self.hover_blur)
+        self.shadow.setColor(QColor(self.glow_color))
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """Decrease glow when not hovering"""
+        self.shadow.setBlurRadius(self.base_blur)
+        super().leaveEvent(event)
+
 # Load custom fonts
 def load_fonts():
     """Load custom fonts for the application"""
@@ -101,6 +142,193 @@ def load_fonts():
             print(f"Font file not found: {font_path}")
     
     return loaded_fonts
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ATMOSPHERIC EFFECT WIDGETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DepthGauge(QWidget):
+    """Vertical gauge showing conversation depth/turn progress"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_turn = 0
+        self.max_turns = 10
+        self.setFixedWidth(24)
+        self.setMinimumHeight(100)
+        
+        # Animation
+        self.pulse_offset = 0
+        self.pulse_timer = QTimer(self)
+        self.pulse_timer.timeout.connect(self._animate_pulse)
+        self.pulse_timer.start(50)
+        
+    def _animate_pulse(self):
+        self.pulse_offset = (self.pulse_offset + 2) % 360
+        self.update()
+    
+    def set_progress(self, current, maximum):
+        """Update the gauge progress"""
+        self.current_turn = current
+        self.max_turns = max(maximum, 1)
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w, h = self.width(), self.height()
+        margin = 4
+        gauge_width = w - margin * 2
+        gauge_height = h - margin * 2
+        
+        # Background track
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS['bg_dark']))
+        painter.drawRoundedRect(margin, margin, gauge_width, gauge_height, 4, 4)
+        
+        # Border
+        painter.setPen(QPen(QColor(COLORS['border_glow']), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(margin, margin, gauge_width, gauge_height, 4, 4)
+        
+        # Calculate fill height (fills from bottom to top)
+        progress = min(self.current_turn / self.max_turns, 1.0)
+        fill_height = int(gauge_height * progress)
+        fill_y = margin + gauge_height - fill_height
+        
+        if fill_height > 0:
+            # Gradient fill
+            gradient = QLinearGradient(0, fill_y, 0, margin + gauge_height)
+            
+            # Color shifts based on depth - deeper = more purple/pink
+            if progress < 0.33:
+                gradient.setColorAt(0, QColor(COLORS['accent_cyan']))
+                gradient.setColorAt(1, QColor(COLORS['accent_cyan']).darker(130))
+            elif progress < 0.66:
+                gradient.setColorAt(0, QColor(COLORS['accent_purple']))
+                gradient.setColorAt(1, QColor(COLORS['accent_cyan']))
+            else:
+                gradient.setColorAt(0, QColor(COLORS['accent_pink']))
+                gradient.setColorAt(1, QColor(COLORS['accent_purple']))
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(gradient)
+            painter.drawRoundedRect(margin + 2, fill_y, gauge_width - 4, fill_height, 2, 2)
+            
+            # Pulsing glow line at top of fill
+            pulse_alpha = int(100 + 80 * math.sin(math.radians(self.pulse_offset)))
+            glow_color = QColor(COLORS['accent_cyan'])
+            glow_color.setAlpha(pulse_alpha)
+            painter.setPen(QPen(glow_color, 2))
+            painter.drawLine(margin + 2, fill_y, margin + gauge_width - 2, fill_y)
+        
+        # Turn counter text
+        painter.setPen(QColor(COLORS['text_dim']))
+        font = painter.font()
+        font.setPixelSize(9)
+        painter.setFont(font)
+        text = f"{self.current_turn}"
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, text)
+
+
+class SignalIndicator(QWidget):
+    """Signal strength/latency indicator"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(80, 20)
+        self.signal_strength = 1.0  # 0.0 to 1.0
+        self.latency_ms = 0
+        self.is_active = False
+        
+        # Animation for activity
+        self.bar_offset = 0
+        self.activity_timer = QTimer(self)
+        self.activity_timer.timeout.connect(self._animate)
+        
+    def _animate(self):
+        self.bar_offset = (self.bar_offset + 1) % 5
+        self.update()
+    
+    def set_active(self, active):
+        """Set whether we're actively waiting for a response"""
+        self.is_active = active
+        if active:
+            self.activity_timer.start(100)
+        else:
+            self.activity_timer.stop()
+        self.update()
+    
+    def set_latency(self, latency_ms):
+        """Update the latency display"""
+        self.latency_ms = latency_ms
+        # Calculate signal strength based on latency
+        if latency_ms < 500:
+            self.signal_strength = 1.0
+        elif latency_ms < 1500:
+            self.signal_strength = 0.75
+        elif latency_ms < 3000:
+            self.signal_strength = 0.5
+        else:
+            self.signal_strength = 0.25
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw signal bars
+        bar_heights = [4, 7, 10, 13, 16]
+        bar_width = 4
+        spacing = 2
+        start_x = 5
+        base_y = 18
+        
+        for i, bar_h in enumerate(bar_heights):
+            x = start_x + i * (bar_width + spacing)
+            y = base_y - bar_h
+            
+            # Determine if this bar should be lit
+            threshold = (i + 1) / len(bar_heights)
+            is_lit = self.signal_strength >= threshold
+            
+            if self.is_active:
+                # Animated pattern when active
+                is_lit = ((i + self.bar_offset) % 5) < 3
+                color = QColor(COLORS['accent_cyan']) if is_lit else QColor(COLORS['bg_light'])
+            else:
+                if is_lit:
+                    # Color based on signal strength
+                    if self.signal_strength > 0.7:
+                        color = QColor(COLORS['accent_green'])
+                    elif self.signal_strength > 0.4:
+                        color = QColor(COLORS['accent_yellow'])
+                    else:
+                        color = QColor(COLORS['accent_pink'])
+                else:
+                    color = QColor(COLORS['bg_light'])
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawRoundedRect(x, y, bar_width, bar_h, 1, 1)
+        
+        # Draw latency text
+        painter.setPen(QColor(COLORS['text_dim']))
+        font = painter.font()
+        font.setPixelSize(9)
+        painter.setFont(font)
+        
+        if self.is_active:
+            text = "···"
+        elif self.latency_ms > 0:
+            text = f"{self.latency_ms}ms"
+        else:
+            text = "IDLE"
+        
+        painter.drawText(40, 3, 40, 16, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+
 
 class NetworkGraphWidget(QWidget):
     nodeSelected = pyqtSignal(str)
@@ -1203,14 +1431,12 @@ class ControlPanel(QWidget):
         actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
         action_layout.addWidget(actions_label)
         
-        # Export button
-        self.export_button = QPushButton("📡 EXPORT")
-        self.export_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_purple']))
+        # Export button with glow
+        self.export_button = self.create_glow_button("📡 EXPORT", COLORS['accent_purple'])
         action_layout.addWidget(self.export_button)
         
-        # View HTML button
-        self.view_html_button = QPushButton("🌐 VIEW HTML")
-        self.view_html_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_green']))
+        # View HTML button with glow
+        self.view_html_button = self.create_glow_button("🌐 VIEW HTML", COLORS['accent_green'])
         self.view_html_button.clicked.connect(lambda: open_html_in_browser("shared_document.html"))
         action_layout.addWidget(self.view_html_button)
         
@@ -1317,9 +1543,9 @@ class ControlPanel(QWidget):
             QPushButton {{
                 background-color: {COLORS['bg_medium']};
                 color: {accent_color};
-                border: 1px solid {accent_color};
-                border-radius: 2px;
-                padding: 8px 12px;
+                border: 2px solid {accent_color};
+                border-radius: 3px;
+                padding: 10px 14px;
                 font-weight: bold;
                 font-size: 10px;
                 letter-spacing: 1px;
@@ -1328,12 +1554,19 @@ class ControlPanel(QWidget):
             QPushButton:hover {{
                 background-color: {accent_color};
                 color: {COLORS['bg_dark']};
+                border: 2px solid {accent_color};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['bg_light']};
                 color: {accent_color};
             }}
         """
+    
+    def create_glow_button(self, text, accent_color):
+        """Create a button with glow effect"""
+        button = GlowButton(text, accent_color)
+        button.setStyleSheet(self.get_cyberpunk_button_style(accent_color))
+        return button
     
     def initialize_selectors(self):
         """Initialize the selector dropdowns with values from config"""
@@ -1618,22 +1851,25 @@ class ConversationPane(QWidget):
         """)
         self.upload_image_button.setToolTip("Upload an image to include in your message")
         
-        # Clear button
-        self.clear_button = QPushButton("CLEAR")
+        # Clear button with subtle glow
+        self.clear_button = GlowButton("CLEAR", COLORS['accent_pink'])
+        self.clear_button.shadow.setBlurRadius(5)  # Subtler glow
+        self.clear_button.base_blur = 5
+        self.clear_button.hover_blur = 12
         self.clear_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_normal']};
                 border: 1px solid {COLORS['border_glow']};
-                border-radius: 0px;
-                padding: 6px 10px;
+                border-radius: 3px;
+                padding: 8px 12px;
                 font-weight: bold;
                 font-size: 10px;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_light']};
-                border: 1px solid {COLORS['accent_pink']};
+                border: 2px solid {COLORS['accent_pink']};
                 color: {COLORS['accent_pink']};
             }}
             QPushButton:pressed {{
@@ -1641,22 +1877,23 @@ class ConversationPane(QWidget):
             }}
         """)
         
-        # Submit button with cyberpunk styling
-        self.submit_button = QPushButton("⚡ PROPAGATE")
+        # Submit button with cyberpunk styling and glow effect
+        self.submit_button = GlowButton("⚡ PROPAGATE", COLORS['accent_cyan'])
         self.submit_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['accent_cyan']};
                 color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['accent_cyan']};
-                border-radius: 0px;
-                padding: 6px 16px;
+                border: 2px solid {COLORS['accent_cyan']};
+                border-radius: 3px;
+                padding: 8px 20px;
                 font-weight: bold;
                 font-size: 11px;
-                letter-spacing: 1px;
+                letter-spacing: 2px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['bg_dark']};
                 color: {COLORS['accent_cyan']};
+                border: 2px solid {COLORS['accent_cyan']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['accent_cyan_active']};
@@ -1665,7 +1902,7 @@ class ConversationPane(QWidget):
             QPushButton:disabled {{
                 background-color: {COLORS['border']};
                 color: {COLORS['text_dim']};
-                border: 1px solid {COLORS['border']};
+                border: 2px solid {COLORS['border']};
             }}
         """)
         
@@ -2262,6 +2499,147 @@ class ConversationPane(QWidget):
             QMessageBox.critical(self, "Export Error", error_msg)
             print(error_msg)
 
+
+class CentralContainer(QWidget):
+    """Central container widget with animated background and overlay support"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Background animation state
+        self.bg_offset = 0
+        self.noise_offset = 0
+        
+        # Animation timer for background
+        self.bg_timer = QTimer(self)
+        self.bg_timer.timeout.connect(self._animate_bg)
+        self.bg_timer.start(80)  # ~12 FPS for subtle movement
+        
+        # Create scanline overlay as child widget
+        self.scanline_overlay = ScanlineOverlayWidget(self)
+        self.scanline_overlay.hide()
+    
+    def _animate_bg(self):
+        self.bg_offset = (self.bg_offset + 1) % 360
+        self.noise_offset = (self.noise_offset + 0.5) % 100
+        self.update()
+    
+    def set_scanlines_enabled(self, enabled):
+        """Toggle scanline effect"""
+        if enabled:
+            # Ensure overlay has correct geometry before showing
+            self.scanline_overlay.setGeometry(self.rect())
+            self.scanline_overlay.show()
+            self.scanline_overlay.raise_()
+            self.scanline_overlay.start_animation()
+        else:
+            self.scanline_overlay.stop_animation()
+            self.scanline_overlay.hide()
+    
+    def resizeEvent(self, event):
+        """Update scanline overlay size when container resizes"""
+        super().resizeEvent(event)
+        self.scanline_overlay.setGeometry(self.rect())
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # ═══ ANIMATED BACKGROUND ═══
+        # Create shifting gradient with more visible movement
+        center_x = self.width() / 2 + math.sin(math.radians(self.bg_offset)) * 100
+        center_y = self.height() / 2 + math.cos(math.radians(self.bg_offset * 0.7)) * 60
+        
+        gradient = QRadialGradient(center_x, center_y, max(self.width(), self.height()) * 0.9)
+        
+        # More visible atmospheric colors with cyan tint
+        pulse = 0.5 + 0.5 * math.sin(math.radians(self.bg_offset * 2))
+        center_r = int(10 + 8 * pulse)
+        center_g = int(15 + 10 * pulse)
+        center_b = int(30 + 15 * pulse)
+        
+        gradient.setColorAt(0, QColor(center_r, center_g, center_b))
+        gradient.setColorAt(0.4, QColor(10, 14, 26))
+        gradient.setColorAt(1, QColor(6, 8, 14))
+        
+        painter.fillRect(self.rect(), gradient)
+        
+        # Add subtle glow lines at edges
+        glow_alpha = int(15 + 10 * pulse)
+        glow_color = QColor(6, 182, 212, glow_alpha)  # Cyan glow
+        painter.setPen(QPen(glow_color, 2))
+        
+        # Top edge glow
+        painter.drawLine(0, 0, self.width(), 0)
+        # Bottom edge glow  
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        # Left edge glow
+        painter.drawLine(0, 0, 0, self.height())
+        # Right edge glow
+        painter.drawLine(self.width() - 1, 0, self.width() - 1, self.height())
+        
+        # Add subtle noise/grain pattern
+        noise_color = QColor(COLORS['accent_cyan'])
+        noise_color.setAlpha(8)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(noise_color)
+        
+        # Sparse random dots for grain effect
+        random.seed(int(self.noise_offset))
+        for _ in range(50):
+            x = random.randint(0, self.width())
+            y = random.randint(0, self.height())
+            painter.drawEllipse(x, y, 1, 1)
+
+
+class ScanlineOverlayWidget(QWidget):
+    """Transparent overlay widget for CRT scanline effect"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        self.scanline_offset = 0
+        self.intensity = 0.25  # More visible scanlines
+        
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self._animate)
+    
+    def start_animation(self):
+        self.anim_timer.start(100)
+    
+    def stop_animation(self):
+        self.anim_timer.stop()
+    
+    def _animate(self):
+        self.scanline_offset = (self.scanline_offset + 1) % 4
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        
+        # Draw horizontal scanlines - more visible
+        line_alpha = int(255 * self.intensity)
+        line_color = QColor(0, 0, 0, line_alpha)
+        painter.setPen(QPen(line_color, 1))
+        
+        # Draw every 2nd line for more visible effect
+        for y in range(self.scanline_offset, self.height(), 2):
+            painter.drawLine(0, y, self.width(), y)
+        
+        # Subtle vignette effect at edges
+        gradient = QRadialGradient(self.width() / 2, self.height() / 2, 
+                                   max(self.width(), self.height()) * 0.7)
+        gradient.setColorAt(0, QColor(0, 0, 0, 0))
+        gradient.setColorAt(0.7, QColor(0, 0, 0, 0))
+        gradient.setColorAt(1, QColor(0, 0, 0, int(255 * self.intensity * 1.5)))
+        
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawRect(self.rect())
+
+
 class LiminalBackroomsApp(QMainWindow):
     """Main application window"""
     def __init__(self):
@@ -2296,14 +2674,14 @@ class LiminalBackroomsApp(QMainWindow):
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
         
-        # Create central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Create central widget - this will be a custom widget that paints the background
+        self.central_container = CentralContainer()
+        self.setCentralWidget(self.central_container)
         
-        # Create main layout
-        main_layout = QHBoxLayout(central_widget)
+        # Main layout for content
+        main_layout = QHBoxLayout(self.central_container)
         main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(0)
+        main_layout.setSpacing(5)
         
         # Create horizontal splitter for left and right panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2335,6 +2713,9 @@ class LiminalBackroomsApp(QMainWindow):
         # Initialize main conversation as root node
         self.right_sidebar.add_node('main', 'Seed', 'main')
         
+        # ═══ SIGNAL INDICATOR ═══
+        self.signal_indicator = SignalIndicator()
+        
         # Status bar with modern styling
         self.statusBar().setStyleSheet(f"""
             QStatusBar {{
@@ -2347,8 +2728,47 @@ class LiminalBackroomsApp(QMainWindow):
         """)
         self.statusBar().showMessage("Ready")
         
+        # Add signal indicator to status bar
+        self.statusBar().addPermanentWidget(self.signal_indicator)
+        
+        # ═══ CRT TOGGLE CHECKBOX ═══
+        self.crt_checkbox = QCheckBox("CRT")
+        self.crt_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                spacing: 4px;
+            }}
+            QCheckBox::indicator {{
+                width: 12px;
+                height: 12px;
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 2px;
+                background: {COLORS['bg_dark']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS['accent_cyan']};
+            }}
+        """)
+        self.crt_checkbox.setToolTip("Toggle CRT scanline effect")
+        self.crt_checkbox.toggled.connect(self.toggle_crt_effect)
+        self.statusBar().addPermanentWidget(self.crt_checkbox)
+        
         # Set up input callback
         self.left_pane.set_input_callback(self.handle_user_input)
+    
+    def toggle_crt_effect(self, enabled):
+        """Toggle the CRT scanline effect"""
+        if hasattr(self, 'central_container'):
+            self.central_container.set_scanlines_enabled(enabled)
+    
+    def set_signal_active(self, active):
+        """Set signal indicator to active (waiting for response)"""
+        self.signal_indicator.set_active(active)
+    
+    def update_signal_latency(self, latency_ms):
+        """Update signal indicator with response latency"""
+        self.signal_indicator.set_latency(latency_ms)
     
     def connect_signals(self):
         """Connect all signals and slots"""

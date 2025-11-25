@@ -715,6 +715,13 @@ class ConversationManager:
         # Start loading animation
         self.app.left_pane.start_loading()
         
+        # Set signal indicator to active
+        if hasattr(self.app, 'set_signal_active'):
+            self.app.set_signal_active(True)
+        
+        # Track request start time for latency
+        self._request_start_time = time.time()
+        
         # Reset turn count ONLY if this is a new conversation or explicit user input
         max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         if user_input is not None or not self.app.main_conversation:
@@ -804,6 +811,9 @@ class ConversationManager:
             else:
                 print(f"BRANCH: All {max_iterations} turns completed")
                 self.app.statusBar().showMessage(f"Completed {max_iterations} turns")
+                # Set signal indicator to idle
+                if hasattr(self.app, 'set_signal_active'):
+                    self.app.set_signal_active(False)
         else:
             # Main conversation
             print(f"MAIN: Turn {self.app.turn_count} of {max_iterations} completed")
@@ -819,6 +829,9 @@ class ConversationManager:
             else:
                 print(f"MAIN: All {max_iterations} turns completed")
                 self.app.statusBar().showMessage(f"Completed {max_iterations} turns")
+                # Set signal indicator to idle
+                if hasattr(self.app, 'set_signal_active'):
+                    self.app.set_signal_active(False)
     
     def handle_progress(self, message):
         """Handle progress update from worker"""
@@ -830,6 +843,9 @@ class ConversationManager:
         print(f"Error: {error_message}")
         self.app.left_pane.append_text(f"\nError: {error_message}\n", "system")
         self.app.statusBar().showMessage(f"Error: {error_message}")
+        # Set signal indicator to idle on error
+        if hasattr(self.app, 'set_signal_active'):
+            self.app.set_signal_active(False)
     
     def process_branch_input(self, user_input=None):
         """Process input from the user specifically for branch conversations"""
@@ -993,6 +1009,11 @@ class ConversationManager:
             ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_number)
             self.app.left_pane.append_text(f"\n{ai_name} ({model_name}):\n\n", "header")
+            
+            # Calculate and update latency on first chunk
+            if hasattr(self, '_request_start_time') and hasattr(self.app, 'update_signal_latency'):
+                latency_ms = int((time.time() - self._request_start_time) * 1000)
+                self.app.update_signal_latency(latency_ms)
         
         # Append chunk to buffer
         self._streaming_buffers[ai_name] += chunk
