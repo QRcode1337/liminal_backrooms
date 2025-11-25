@@ -394,118 +394,136 @@ def call_replicate_api(prompt, conversation_history, model, gui=None):
         print(f"Error calling Flux API: {e}")
         return None
 
-def call_deepseek_api(prompt, conversation_history, model, system_prompt):
-    """Call the DeepSeek model through Replicate API."""
+def call_deepseek_api(prompt, conversation_history, model, system_prompt, stream_callback=None):
+    """Call the DeepSeek model through OpenRouter API."""
     try:
-        # Format messages for the conversation history
-        formatted_history = ""
-        if system_prompt:
-            formatted_history += f"System: {system_prompt}\n"
+        import re
+        from config import SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT
         
-        # Add conversation history ensuring proper interleaving
-        last_role = None
+        # Build messages array
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        
+        # Add conversation history
         for msg in conversation_history:
             if isinstance(msg, dict):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                
-                # Skip if same role as last message
-                if role == last_role:
-                    continue
-                    
-                if isinstance(content, str):
-                    formatted_history += f"{role.capitalize()}: {content}\n"
-                    last_role = role
+                if isinstance(content, str) and content.strip():
+                    messages.append({"role": role, "content": content})
         
-        # Add current prompt
-        formatted_history += f"User: {prompt}\n"
+        # Add current prompt if provided
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
         
-        print(f"\nSending to DeepSeek via Replicate:")
-        print(f"Formatted History:\n{formatted_history}")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+        }
         
-        # Make API call
-        output = replicate.run(
-            "deepseek-ai/deepseek-r1",
-            input={
-                "prompt": formatted_history,
-                "max_tokens": 8000,
-                "temperature": 1
-            }
-        )
+        payload = {
+            "model": "deepseek/deepseek-r1",
+            "messages": messages,
+            "max_tokens": 8000,
+            "temperature": 1,
+            "stream": stream_callback is not None
+        }
         
-        # Collect the response - ensure we get the full output
-        response_text = ""
-        if isinstance(output, list):
-            # Join all chunks to get the complete response
-            response_text = ''.join(output)
-        else:
-            # If output is not a list, convert to string
-            response_text = str(output)
+        print(f"\nSending to DeepSeek via OpenRouter:")
+        print(f"Model: deepseek/deepseek-r1")
+        print(f"Messages: {len(messages)} messages")
+        
+        if stream_callback:
+            # Streaming mode
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=180,
+                stream=True
+            )
             
-        print(f"\nRaw Response: {response_text}")
+            if response.status_code == 200:
+                full_response = ""
+                for line in response.iter_lines():
+                    if line:
+                        line_text = line.decode('utf-8')
+                        if line_text.startswith('data: '):
+                            json_str = line_text[6:]
+                            if json_str.strip() == '[DONE]':
+                                break
+                            try:
+                                chunk_data = json.loads(json_str)
+                                if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                    delta = chunk_data['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        full_response += content
+                                        stream_callback(content)
+                            except json.JSONDecodeError:
+                                continue
+                response_text = full_response
+            else:
+                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
+                print(error_msg)
+                return None
+        else:
+            # Non-streaming mode
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=180
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                response_text = data['choices'][0]['message']['content']
+            else:
+                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
+                print(error_msg)
+                return None
         
-        # Check for HTML contribution marker
-        html_contribution = None
-        conversation_part = response_text
-        
-        # Use more lenient pattern matching - just look for "HTML CONTRIBUTION" anywhere
-        import re
-        html_contribution_match = re.search(r'(?i)[-_\s]*HTML\s*CONTRIBUTION[-_\s]*', response_text)
-        if html_contribution_match:
-            parts = re.split(r'(?i)[-_\s]*HTML\s*CONTRIBUTION[-_\s]*', response_text, 1)
-            if len(parts) > 1:
-                conversation_part = parts[0].strip()
-                html_contribution = parts[1].strip()
-                print(f"Found HTML contribution with lenient pattern: {html_contribution[:100]}...")
+        print(f"\nRaw Response: {response_text[:500]}...")
         
         # Initialize result with content
         result = {
-            "content": conversation_part
+            "content": response_text,
+            "model": "deepseek/deepseek-r1"
         }
         
-        # Only extract and format chain of thought if SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT is True
-        from config import SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT
+        # Extract and format chain of thought if enabled
         if SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT:
-            # Try to extract reasoning from <think> tags in content
             reasoning = None
-            content = conversation_part
+            content = response_text
             
             if content:
                 # Try both <think> and <thinking> tags
                 think_match = re.search(r'<(think|thinking)>(.*?)</\1>', content, re.DOTALL | re.IGNORECASE)
                 if think_match:
                     reasoning = think_match.group(2).strip()
-                    # Remove the thinking section from the content
                     content = re.sub(r'<(think|thinking)>.*?</\1>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
             
-            # Format the response with both CoT and final answer
             display_text = ""
             if reasoning:
                 display_text += f"[Chain of Thought]\n{reasoning}\n\n"
             if content:
                 display_text += f"[Final Answer]\n{content}"
             
-            # Add display field to result
             result["display"] = display_text
-            # Update content to be the cleaned version without thinking tags
             result["content"] = content
         else:
-            # If not showing chain of thought, just use the raw content
-            # Still clean up any thinking tags from the content
-            content = conversation_part
+            # Clean up thinking tags from content
+            content = response_text
             if content:
-                # Remove any thinking tags from the content
                 content = re.sub(r'<(think|thinking)>.*?</\1>', '', content, flags=re.DOTALL | re.IGNORECASE).strip()
                 result["content"] = content
         
-        # Add HTML contribution if found
-        if html_contribution:
-            result["html_contribution"] = html_contribution
-            
         return result
         
     except Exception as e:
-        print(f"Error calling DeepSeek via Replicate: {e}")
+        print(f"Error calling DeepSeek via OpenRouter: {e}")
         print(f"Error type: {type(e)}")
         return None
 
