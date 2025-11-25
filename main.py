@@ -990,7 +990,8 @@ class ConversationManager:
         if ai_name not in self._streaming_buffers:
             self._streaming_buffers[ai_name] = ""
             # Add a header to show this AI is responding
-            model_name = self.get_model_for_ai(ai_name)
+            ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+            model_name = self.get_model_for_ai(ai_number)
             self.app.left_pane.append_text(f"\n{ai_name} ({model_name}):\n\n", "header")
         
         # Append chunk to buffer
@@ -1007,12 +1008,15 @@ class ConversationManager:
         if hasattr(self, '_streaming_buffers') and ai_name in self._streaming_buffers:
             del self._streaming_buffers[ai_name]
         
+        # Extract AI number from ai_name (e.g., "AI-1" -> 1)
+        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        
         # Format the AI response with proper metadata
         ai_message = {
             "role": "assistant",
             "content": response_content,
             "ai_name": ai_name,  # Add AI name to the message
-            "model": self.get_model_for_ai(ai_name)  # Get the selected model name
+            "model": self.get_model_for_ai(ai_number)  # Get the selected model name
         }
         
         # Check if we're in a branch or main conversation
