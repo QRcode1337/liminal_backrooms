@@ -82,7 +82,6 @@ poetry install
    ```env
    ANTHROPIC_API_KEY=your_anthropic_api_key
    OPENROUTER_API_KEY=your_openrouter_api_key
-   REPLICATE_API_TOKEN=your_replicate_token (not required)
    OPENAI_API_KEY=your_openai_api_key  # For Sora video generation (optional)
    ```
 
