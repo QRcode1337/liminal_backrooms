@@ -240,22 +240,59 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
             "X-Title": "AI Conversation"  # Adding title for OpenRouter tracking
         }
         
-        # Format messages
+        # Normalize model ID for OpenRouter - add provider prefix if missing
+        openrouter_model = model
+        if model.startswith("claude-") and not model.startswith("anthropic/"):
+            openrouter_model = f"anthropic/{model}"
+            print(f"Normalized Claude model ID for OpenRouter: {model} -> {openrouter_model}")
+        
+        # Format messages - need to handle structured content with images
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        
+        def convert_to_openai_format(content):
+            """Convert Anthropic-style image format to OpenAI/OpenRouter format"""
+            if not isinstance(content, list):
+                return content
+            
+            converted = []
+            for part in content:
+                if part.get('type') == 'text':
+                    converted.append({"type": "text", "text": part.get('text', '')})
+                elif part.get('type') == 'image':
+                    # Convert Anthropic format to OpenAI format
+                    source = part.get('source', {})
+                    if source.get('type') == 'base64':
+                        media_type = source.get('media_type', 'image/png')
+                        data = source.get('data', '')
+                        converted.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{data}"
+                            }
+                        })
+                elif part.get('type') == 'image_url':
+                    # Already in OpenAI format
+                    converted.append(part)
+                else:
+                    # Pass through unknown types
+                    converted.append(part)
+            return converted
             
         for msg in conversation_history:
             if msg["role"] != "system":  # Skip system prompts
+                # Convert image format for OpenRouter compatibility
                 messages.append({
                     "role": msg["role"],
-                    "content": msg["content"]
+                    "content": convert_to_openai_format(msg["content"])
                 })
         
-        messages.append({"role": "user", "content": prompt})
+        # Also convert the prompt if it's structured content
+        messages.append({"role": "user", "content": convert_to_openai_format(prompt)})
         
         payload = {
-            "model": model,  # Using the exact model name from config
+            "model": openrouter_model,  # Using normalized model name for OpenRouter
             "messages": messages,
             "temperature": 1,
             "max_tokens": 4000,
@@ -749,7 +786,8 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                     "content": text
                 }
             ],
-            "modalities": ["image", "text"]
+            "modalities": ["image", "text"],
+            "max_tokens": 1024  # Limit tokens for image generation to avoid credit issues
         }
         
         print(f"Generating image with {model}...")
@@ -776,12 +814,22 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                         # Handle base64 data URL
                         if image_url.startswith('data:image'):
                             try:
+                                # Detect actual image format from data URL header
+                                # Format: data:image/jpeg;base64,... or data:image/png;base64,...
+                                ext = ".jpg"  # Default to jpg
+                                if image_url.startswith('data:image/png'):
+                                    ext = ".png"
+                                elif image_url.startswith('data:image/gif'):
+                                    ext = ".gif"
+                                elif image_url.startswith('data:image/webp'):
+                                    ext = ".webp"
+                                
                                 # Extract base64 data after comma
                                 base64_data = image_url.split(',', 1)[1] if ',' in image_url else image_url
                                 
                                 # Decode base64 to image
                                 image_data = base64.b64decode(base64_data)
-                                image_path = image_dir / f"generated_{timestamp}.png"
+                                image_path = image_dir / f"generated_{timestamp}{ext}"
                                 with open(image_path, "wb") as f:
                                     f.write(image_data)
                                 

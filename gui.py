@@ -1060,6 +1060,260 @@ class NetworkPane(QWidget):
             # Redraw
             self.network_view.update()
 
+class ImagePreviewPane(QWidget):
+    """Pane to display generated images with navigation"""
+    def __init__(self):
+        super().__init__()
+        self.current_image_path = None
+        self.session_images = []  # List of all images generated this session
+        self.current_index = -1   # Current image index
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # Title label
+        self.title = QLabel("🎨 GENERATED IMAGES")
+        self.title.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['accent_purple']};
+                font-weight: bold;
+                font-size: 12px;
+                padding: 5px;
+            }}
+        """)
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.title)
+        
+        # Image display label
+        self.image_label = QLabel("No images generated yet")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                border: 2px dashed {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 200px;
+            }}
+        """)
+        self.image_label.setWordWrap(True)
+        self.image_label.setScaledContents(False)
+        layout.addWidget(self.image_label, 1)
+        
+        # Navigation controls
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+        
+        # Previous button
+        self.prev_button = QPushButton("◀ Prev")
+        self.prev_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_purple']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.prev_button.clicked.connect(self.show_previous)
+        self.prev_button.setEnabled(False)
+        nav_layout.addWidget(self.prev_button)
+        
+        # Position indicator
+        self.position_label = QLabel("")
+        self.position_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+            }}
+        """)
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.position_label, 1)
+        
+        # Next button
+        self.next_button = QPushButton("Next ▶")
+        self.next_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_purple']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.next_button.clicked.connect(self.show_next)
+        self.next_button.setEnabled(False)
+        nav_layout.addWidget(self.next_button)
+        
+        layout.addLayout(nav_layout)
+        
+        # Image info label
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                padding: 5px;
+            }}
+        """)
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+        
+        # Open in folder button
+        self.open_button = QPushButton("📂 Open Images Folder")
+        self.open_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_purple']};
+            }}
+        """)
+        self.open_button.clicked.connect(self.open_images_folder)
+        layout.addWidget(self.open_button)
+    
+    def add_image(self, image_path):
+        """Add a new image to the session gallery and display it"""
+        if image_path and os.path.exists(image_path):
+            # Avoid duplicates
+            if image_path not in self.session_images:
+                self.session_images.append(image_path)
+            # Jump to the new image
+            self.current_index = len(self.session_images) - 1
+            self._display_current()
+    
+    def set_image(self, image_path):
+        """Display an image - also adds to gallery if new"""
+        self.add_image(image_path)
+    
+    def _display_current(self):
+        """Display the image at current_index"""
+        if not self.session_images or self.current_index < 0:
+            self.image_label.setText("No images generated yet")
+            self.info_label.setText("")
+            self.position_label.setText("")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            return
+        
+        image_path = self.session_images[self.current_index]
+        self.current_image_path = image_path
+        
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                # Scale to fit the label while maintaining aspect ratio
+                scaled = pixmap.scaled(
+                    self.image_label.size() - QSize(20, 20),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.image_label.setPixmap(scaled)
+                self.image_label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {COLORS['bg_medium']};
+                        border: 2px solid {COLORS['accent_purple']};
+                        border-radius: 8px;
+                        padding: 10px;
+                    }}
+                """)
+                
+                # Update info
+                filename = os.path.basename(image_path)
+                self.info_label.setText(f"📁 {filename}")
+            else:
+                self.image_label.setText("Failed to load image")
+                self.info_label.setText("")
+        else:
+            self.image_label.setText("Image not found")
+            self.info_label.setText("")
+        
+        # Update navigation
+        total = len(self.session_images)
+        current = self.current_index + 1
+        self.position_label.setText(f"{current} of {total}")
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < total - 1)
+    
+    def show_previous(self):
+        """Show the previous image"""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._display_current()
+    
+    def show_next(self):
+        """Show the next image"""
+        if self.current_index < len(self.session_images) - 1:
+            self.current_index += 1
+            self._display_current()
+    
+    def clear_session(self):
+        """Clear all session images (e.g., when starting a new conversation)"""
+        self.session_images = []
+        self.current_index = -1
+        self.current_image_path = None
+        self.image_label.setText("No images generated yet")
+        self.image_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                border: 2px dashed {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 200px;
+            }}
+        """)
+        self.info_label.setText("")
+        self.position_label.setText("")
+        self.prev_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+    
+    def open_images_folder(self):
+        """Open the images folder in file explorer"""
+        import subprocess
+        images_dir = os.path.join(os.path.dirname(__file__), 'images')
+        if os.path.exists(images_dir):
+            subprocess.Popen(f'explorer "{images_dir}"')
+        else:
+            # Try to create it
+            os.makedirs(images_dir, exist_ok=True)
+            subprocess.Popen(f'explorer "{images_dir}"')
+    
+    def resizeEvent(self, event):
+        """Re-scale image when pane is resized"""
+        super().resizeEvent(event)
+        if self.current_image_path:
+            self._display_current()
+
+
 class RightSidebar(QWidget):
     """Right sidebar with tabbed interface for Setup and Network Graph"""
     nodeSelected = pyqtSignal(str)
@@ -1090,6 +1344,7 @@ class RightSidebar(QWidget):
         # Tab buttons
         self.setup_button = QPushButton("⚙ SETUP")
         self.graph_button = QPushButton("🌐 GRAPH")
+        self.image_button = QPushButton("🖼 IMAGE")
         
         # Cyberpunk tab button styling
         tab_style = f"""
@@ -1117,18 +1372,22 @@ class RightSidebar(QWidget):
         
         self.setup_button.setStyleSheet(tab_style)
         self.graph_button.setStyleSheet(tab_style)
+        self.image_button.setStyleSheet(tab_style)
         
         # Make buttons checkable for tab behavior
         self.setup_button.setCheckable(True)
         self.graph_button.setCheckable(True)
+        self.image_button.setCheckable(True)
         self.setup_button.setChecked(True)  # Start with setup tab active
         
         # Connect tab buttons
         self.setup_button.clicked.connect(lambda: self.switch_tab(0))
         self.graph_button.clicked.connect(lambda: self.switch_tab(1))
+        self.image_button.clicked.connect(lambda: self.switch_tab(2))
         
         tab_layout.addWidget(self.setup_button)
         tab_layout.addWidget(self.graph_button)
+        tab_layout.addWidget(self.image_button)
         
         layout.addWidget(tab_container)
         
@@ -1145,10 +1404,12 @@ class RightSidebar(QWidget):
         # Create tab pages
         self.control_panel = ControlPanel()
         self.network_pane = NetworkPane()
+        self.image_preview_pane = ImagePreviewPane()
         
         # Add pages to stack
         self.stack.addWidget(self.control_panel)
         self.stack.addWidget(self.network_pane)
+        self.stack.addWidget(self.image_preview_pane)
         
         layout.addWidget(self.stack, 1)  # Stretch to fill
         
@@ -1162,6 +1423,12 @@ class RightSidebar(QWidget):
         # Update button states
         self.setup_button.setChecked(index == 0)
         self.graph_button.setChecked(index == 1)
+        self.image_button.setChecked(index == 2)
+    
+    def update_image_preview(self, image_path):
+        """Update the image preview pane with a new image"""
+        if hasattr(self, 'image_preview_pane'):
+            self.image_preview_pane.set_image(image_path)
     
     def add_node(self, node_id, label, node_type):
         """Forward to network pane"""
@@ -2070,6 +2337,7 @@ class ConversationPane(QWidget):
         html += f".branch-indicator {{ color: {COLORS['text_dim']}; font-style: italic; text-align: center; margin: 8px 0; }}"
         html += f".rabbithole {{ color: {COLORS['accent_green']}; }}"
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
+        html += f".agent-notification {{ background-color: #1a2a2a; border-left: 3px solid {COLORS['accent_cyan']}; padding: 8px 12px; margin: 8px 0; color: {COLORS['accent_cyan']}; font-style: normal; }}"
         # Removed HTML contribution styling
         html += f"pre {{ background-color: {COLORS['bg_dark']}; border: 1px solid {COLORS['border']}; border-radius: 3px; padding: 8px; overflow-x: auto; margin: 8px 0; }}"
         html += f"code {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; color: {COLORS['text_bright']}; }}"
@@ -2084,7 +2352,14 @@ class ConversationPane(QWidget):
             # Handle structured content (with images)
             has_image = False
             image_base64 = None
+            generated_image_path = None
             text_content = ""
+            
+            # Check for generated image path (from AI image generation)
+            if hasattr(message, "get") and callable(message.get):
+                generated_image_path = message.get("generated_image_path", None)
+                if generated_image_path and os.path.exists(generated_image_path):
+                    has_image = True
             
             if isinstance(content, list):
                 # Structured content with potential images
@@ -2112,6 +2387,26 @@ class ConversationPane(QWidget):
                     html += f'<div class="branch-indicator fork">{content}</div>'
                 continue
             
+            # Handle agent notifications with special styling
+            if role == 'system' and message.get('_type') == 'agent_notification':
+                print(f"[GUI] Rendering agent notification: {text_content[:50]}...")
+                html += f'<div class="agent-notification">{text_content}</div>'
+                continue
+            
+            # Handle generated images with special styling
+            if message.get('_type') == 'generated_image':
+                creator = message.get('ai_name', 'AI')
+                if generated_image_path and os.path.exists(generated_image_path):
+                    file_url = f"file:///{generated_image_path.replace(os.sep, '/')}"
+                    html += f'<div class="message" style="background-color: #1a1a2e; border: 1px solid {COLORS["accent_purple"]}; text-align: center; padding: 12px;">'
+                    html += f'<div style="color: {COLORS["accent_purple"]}; margin-bottom: 8px;">🎨 {creator} created an image</div>'
+                    html += f'<img src="{file_url}" style="max-width: 450px; border-radius: 8px;" />'
+                    if text_content:
+                        # Extract just the prompt part
+                        html += f'<div style="color: {COLORS["text_dim"]}; font-size: 9pt; margin-top: 8px; font-style: italic;">{text_content}</div>'
+                    html += f'</div>'
+                continue
+            
             # Removed HTML contribution indicator logic
             
             # Process content to handle code blocks
@@ -2119,8 +2414,13 @@ class ConversationPane(QWidget):
             
             # Add image display if present
             image_html = ""
-            if has_image and image_base64:
-                image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px;" /></div>'
+            if has_image:
+                if image_base64:
+                    image_html = f'<div style="margin: 10px 0;"><img src="data:image/jpeg;base64,{image_base64}" style="max-width: 100%; border-radius: 8px;" /></div>'
+                elif generated_image_path and os.path.exists(generated_image_path):
+                    # Use file:// URL for local generated images
+                    file_url = f"file:///{generated_image_path.replace(os.sep, '/')}"
+                    image_html = f'<div style="margin: 10px 0; text-align: center;"><img src="{file_url}" style="max-width: 400px; border-radius: 8px; border: 1px solid {COLORS["border"]};" /><div style="font-size: 9pt; color: {COLORS["text_dim"]}; margin-top: 4px;">🎨 Generated image</div></div>'
             
             # Format based on role
             if role == 'user':
@@ -2423,81 +2723,131 @@ class ConversationPane(QWidget):
             self.append_text(f"[Error displaying image: {str(e)}]\n", "error")
     
     def export_conversation(self):
-        """Export the conversation to a file"""
-        # Set default directory to user's documents folder or a custom exports folder
-        default_dir = ""
+        """Export the conversation and all session media to a folder"""
+        # Set default directory - custom Dropbox path with fallbacks
+        base_dir = r"C:\Users\sjeff\Dropbox\Stephen Work\LiminalBackrooms"
         
-        # Try to use user's Documents folder
-        documents_path = os.path.join(os.path.expanduser("~"), "Documents")
-        if os.path.exists(documents_path):
-            default_dir = os.path.join(documents_path, "LiminalBackrooms")
-        else:
-            # Fallback to a local exports directory
-            default_dir = os.path.join(os.getcwd(), "exports")
+        # Fallback if that path doesn't exist
+        if not os.path.exists(os.path.dirname(base_dir)):
+            documents_path = os.path.join(os.path.expanduser("~"), "Documents")
+            if os.path.exists(documents_path):
+                base_dir = os.path.join(documents_path, "LiminalBackrooms")
+            else:
+                base_dir = os.path.join(os.getcwd(), "exports")
         
-        # Create the directory if it doesn't exist
-        os.makedirs(default_dir, exist_ok=True)
+        # Create the base directory if it doesn't exist
+        os.makedirs(base_dir, exist_ok=True)
         
-        # Generate a default filename based on date/time
+        # Generate a session folder name based on date/time
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_filename = os.path.join(default_dir, f"conversation_{timestamp}.txt")
+        default_folder = os.path.join(base_dir, f"session_{timestamp}")
         
-        # Get the file name from a save dialog
-        file_name, selected_filter = QFileDialog.getSaveFileName(
-            self, 
-            "Export Conversation",
-            default_filename,
-            "Text Files (*.txt);;Markdown Files (*.md);;HTML Files (*.html);;Full HTML Document (*.html);;All Files (*)"
+        # Get the folder from a dialog
+        folder_name = QFileDialog.getExistingDirectory(
+            self,
+            "Select Export Folder (or create new)",
+            base_dir,
+            QFileDialog.Option.ShowDirsOnly
         )
         
-        if not file_name:
-            return  # User cancelled the dialog
+        # If user cancelled, offer to create the default folder
+        if not folder_name:
+            reply = QMessageBox.question(
+                self,
+                "Create Export Folder?",
+                f"Create new export folder?\n\n{default_folder}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                folder_name = default_folder
+            else:
+                return
         
         try:
-            # Determine export format based on file extension
-            _, ext = os.path.splitext(file_name)
-        
-            # Export as Full HTML Document
-            if selected_filter == "Full HTML Document (*.html)":
-                # Copy the existing conversation_full.html file if it exists
-                full_html_path = os.path.join(os.getcwd(), "conversation_full.html")
-                if os.path.exists(full_html_path):
-                    shutil.copy2(full_html_path, file_name)
-                    print(f"Full HTML document exported to {file_name}")
-                    
-                    # Get main window
-                    main_window = self.window()
-                    main_window.statusBar().showMessage(f"Full HTML document exported to {file_name}")
-                    return
-                else:
-                    # Fallback to regular HTML if full document doesn't exist
-                    content = self.conversation_display.toHtml()
-            elif ext.lower() == '.html':
-                # Export as HTML - the QTextEdit already contains HTML formatting
-                content = self.conversation_display.toHtml()
-            elif ext.lower() == '.md':
-                # Export as Markdown - convert HTML to markdown
-                html_content = self.conversation_display.toHtml()
-                # Simple conversion for now (could be improved with a proper HTML->MD converter)
-                content = html_content.replace('<b>', '**').replace('</b>', '**')
-                content = re.sub(r'<[^>]*>', '', content)  # Remove other HTML tags
-            else:
-                # Export as plain text
-                content = self.conversation_display.toPlainText()
+            # Create the export folder
+            os.makedirs(folder_name, exist_ok=True)
             
-            # Write content to file
-            with open(file_name, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # For status message - get main window
+            # Get main window for accessing session data
             main_window = self.window()
-            main_window.statusBar().showMessage(f"Conversation exported to {file_name}")
-            print(f"Conversation exported to {file_name}")
+            
+            # Export conversation as multiple formats
+            # Plain text
+            text_path = os.path.join(folder_name, "conversation.txt")
+            with open(text_path, 'w', encoding='utf-8') as f:
+                f.write(self.conversation_display.toPlainText())
+            
+            # HTML
+            html_path = os.path.join(folder_name, "conversation.html")
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(self.conversation_display.toHtml())
+            
+            # Full HTML document if it exists
+            full_html_path = os.path.join(os.getcwd(), "conversation_full.html")
+            if os.path.exists(full_html_path):
+                shutil.copy2(full_html_path, os.path.join(folder_name, "conversation_full.html"))
+            
+            # Copy session images
+            images_copied = 0
+            if hasattr(main_window, 'right_sidebar') and hasattr(main_window.right_sidebar, 'image_preview_pane'):
+                session_images = main_window.right_sidebar.image_preview_pane.session_images
+                if session_images:
+                    images_dir = os.path.join(folder_name, "images")
+                    os.makedirs(images_dir, exist_ok=True)
+                    for img_path in session_images:
+                        if os.path.exists(img_path):
+                            shutil.copy2(img_path, images_dir)
+                            images_copied += 1
+            
+            # Copy session videos
+            videos_copied = 0
+            if hasattr(main_window, 'session_videos'):
+                session_videos = main_window.session_videos
+                if session_videos:
+                    videos_dir = os.path.join(folder_name, "videos")
+                    os.makedirs(videos_dir, exist_ok=True)
+                    for vid_path in session_videos:
+                        if os.path.exists(vid_path):
+                            shutil.copy2(vid_path, videos_dir)
+                            videos_copied += 1
+            
+            # Create a manifest/summary file
+            manifest_path = os.path.join(folder_name, "manifest.txt")
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                f.write(f"Liminal Backrooms Session Export\n")
+                f.write(f"================================\n")
+                f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"Contents:\n")
+                f.write(f"- conversation.txt (plain text)\n")
+                f.write(f"- conversation.html (HTML format)\n")
+                if os.path.exists(os.path.join(folder_name, "conversation_full.html")):
+                    f.write(f"- conversation_full.html (styled document)\n")
+                f.write(f"- images/ ({images_copied} files)\n")
+                f.write(f"- videos/ ({videos_copied} files)\n")
+            
+            # Status message
+            status_msg = f"Exported to {folder_name} ({images_copied} images, {videos_copied} videos)"
+            main_window.statusBar().showMessage(status_msg)
+            print(f"Session exported to {folder_name}")
+            print(f"  - {images_copied} images")
+            print(f"  - {videos_copied} videos")
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Session exported successfully!\n\n"
+                f"Location: {folder_name}\n\n"
+                f"• Conversation (txt, html)\n"
+                f"• {images_copied} images\n"
+                f"• {videos_copied} videos"
+            )
             
         except Exception as e:
-            error_msg = f"Error exporting conversation: {str(e)}"
+            error_msg = f"Error exporting session: {str(e)}"
             QMessageBox.critical(self, "Export Error", error_msg)
             print(error_msg)
+            import traceback
+            traceback.print_exc()
 
 
 class CentralContainer(QWidget):
@@ -2650,6 +3000,7 @@ class LiminalBackroomsApp(QMainWindow):
         self.turn_count = 0
         self.images = []
         self.image_paths = []
+        self.session_videos = []  # Track videos generated this session
         self.branch_conversations = {}  # Store branch conversations by ID
         self.active_branch = None      # Currently displayed branch
         
@@ -2727,6 +3078,19 @@ class LiminalBackroomsApp(QMainWindow):
             }}
         """)
         self.statusBar().showMessage("Ready")
+        
+        # Add notification label for agent actions (shows latest notification)
+        self.notification_label = QLabel("")
+        self.notification_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['accent_cyan']};
+                font-size: 11px;
+                padding: 2px 10px;
+                background-color: transparent;
+            }}
+        """)
+        self.notification_label.setMaximumWidth(500)
+        self.statusBar().addWidget(self.notification_label, 1)
         
         # Add signal indicator to status bar
         self.statusBar().addPermanentWidget(self.signal_indicator)

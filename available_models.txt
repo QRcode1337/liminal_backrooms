@@ -1,0 +1,22 @@
+Available AI Models for Invitation
+===================================
+
+Use !add_ai "Model Name" to invite any of these:
+
+- Claude Opus 4.5
+- Claude 3 Opus
+- Claude 4.5 Sonnet
+- Claude 4.5 Haiku
+- Claude 4 Sonnet
+- Gemini 3 Pro
+- GPT 5.1
+- GPT 4o
+- Kimi K2
+- Grok 4
+- DeepSeek R1
+- Hermes 4
+
+Example: !add_ai "Grok 4" "a provocative contrarian"
+
+
+
