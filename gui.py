@@ -1314,6 +1314,283 @@ class ImagePreviewPane(QWidget):
             self._display_current()
 
 
+class VideoPreviewPane(QWidget):
+    """Pane to display generated videos with navigation"""
+    def __init__(self):
+        super().__init__()
+        self.current_video_path = None
+        self.session_videos = []  # List of all videos generated this session
+        self.current_index = -1   # Current video index
+        self.setup_ui()
+    
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # Title label
+        self.title = QLabel("🎬 GENERATED VIDEOS")
+        self.title.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['accent_cyan']};
+                font-weight: bold;
+                font-size: 12px;
+                padding: 5px;
+            }}
+        """)
+        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.title)
+        
+        # Video display area - we'll show a thumbnail or placeholder
+        self.video_label = QLabel("No videos generated yet")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                border: 2px dashed {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 150px;
+            }}
+        """)
+        self.video_label.setWordWrap(True)
+        layout.addWidget(self.video_label, 1)
+        
+        # Play button
+        self.play_button = QPushButton("▶ Play Video")
+        self.play_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
+                border: none;
+                border-radius: 4px;
+                padding: 10px 20px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_purple']};
+            }}
+            QPushButton:disabled {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+            }}
+        """)
+        self.play_button.clicked.connect(self.play_current_video)
+        self.play_button.setEnabled(False)
+        layout.addWidget(self.play_button)
+        
+        # Navigation controls
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+        
+        # Previous button
+        self.prev_button = QPushButton("◀ Prev")
+        self.prev_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.prev_button.clicked.connect(self.show_previous)
+        self.prev_button.setEnabled(False)
+        nav_layout.addWidget(self.prev_button)
+        
+        # Position indicator
+        self.position_label = QLabel("")
+        self.position_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+            }}
+        """)
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.position_label, 1)
+        
+        # Next button
+        self.next_button = QPushButton("Next ▶")
+        self.next_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+            QPushButton:disabled {{
+                color: {COLORS['text_dim']};
+                background-color: {COLORS['bg_dark']};
+            }}
+        """)
+        self.next_button.clicked.connect(self.show_next)
+        self.next_button.setEnabled(False)
+        nav_layout.addWidget(self.next_button)
+        
+        layout.addLayout(nav_layout)
+        
+        # Video info label
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                padding: 5px;
+            }}
+        """)
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+        
+        # Open in folder button
+        self.open_button = QPushButton("📂 Open Videos Folder")
+        self.open_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        self.open_button.clicked.connect(self.open_videos_folder)
+        layout.addWidget(self.open_button)
+    
+    def add_video(self, video_path):
+        """Add a new video to the session gallery and display it"""
+        if video_path and os.path.exists(video_path):
+            # Avoid duplicates
+            if video_path not in self.session_videos:
+                self.session_videos.append(video_path)
+            # Jump to the new video
+            self.current_index = len(self.session_videos) - 1
+            self._display_current()
+    
+    def set_video(self, video_path):
+        """Display a video - also adds to gallery if new"""
+        self.add_video(video_path)
+    
+    def _display_current(self):
+        """Display the video at current_index"""
+        if not self.session_videos or self.current_index < 0:
+            self.video_label.setText("No videos generated yet")
+            self.info_label.setText("")
+            self.position_label.setText("")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.play_button.setEnabled(False)
+            return
+        
+        video_path = self.session_videos[self.current_index]
+        self.current_video_path = video_path
+        
+        if os.path.exists(video_path):
+            filename = os.path.basename(video_path)
+            # Show video info
+            self.video_label.setText(f"🎬 {filename}\n\n(Click Play to view)")
+            self.video_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {COLORS['bg_medium']};
+                    border: 2px solid {COLORS['accent_cyan']};
+                    border-radius: 8px;
+                    color: {COLORS['text_bright']};
+                    padding: 20px;
+                    min-height: 150px;
+                }}
+            """)
+            self.info_label.setText(f"📁 {filename}")
+            self.play_button.setEnabled(True)
+        else:
+            self.video_label.setText("Video not found")
+            self.info_label.setText("")
+            self.play_button.setEnabled(False)
+        
+        # Update navigation
+        total = len(self.session_videos)
+        current = self.current_index + 1
+        self.position_label.setText(f"{current} of {total}")
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < total - 1)
+    
+    def show_previous(self):
+        """Show the previous video"""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._display_current()
+    
+    def show_next(self):
+        """Show the next video"""
+        if self.current_index < len(self.session_videos) - 1:
+            self.current_index += 1
+            self._display_current()
+    
+    def play_current_video(self):
+        """Open the current video in the default video player"""
+        if self.current_video_path and os.path.exists(self.current_video_path):
+            import subprocess
+            import sys
+            if sys.platform == 'win32':
+                os.startfile(self.current_video_path)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', self.current_video_path])
+            else:
+                subprocess.Popen(['xdg-open', self.current_video_path])
+    
+    def clear_session(self):
+        """Clear all session videos (e.g., when starting a new conversation)"""
+        self.session_videos = []
+        self.current_index = -1
+        self.current_video_path = None
+        self.video_label.setText("No videos generated yet")
+        self.video_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                border: 2px dashed {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                min-height: 150px;
+            }}
+        """)
+        self.info_label.setText("")
+        self.position_label.setText("")
+        self.prev_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+        self.play_button.setEnabled(False)
+    
+    def open_videos_folder(self):
+        """Open the videos folder in file explorer"""
+        import subprocess
+        videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
+        if os.path.exists(videos_dir):
+            subprocess.Popen(f'explorer "{videos_dir}"')
+        else:
+            # Try to create it
+            os.makedirs(videos_dir, exist_ok=True)
+            subprocess.Popen(f'explorer "{videos_dir}"')
+
+
 class RightSidebar(QWidget):
     """Right sidebar with tabbed interface for Setup and Network Graph"""
     nodeSelected = pyqtSignal(str)
@@ -1345,6 +1622,7 @@ class RightSidebar(QWidget):
         self.setup_button = QPushButton("⚙ SETUP")
         self.graph_button = QPushButton("🌐 GRAPH")
         self.image_button = QPushButton("🖼 IMAGE")
+        self.video_button = QPushButton("🎬 VIDEO")
         
         # Cyberpunk tab button styling
         tab_style = f"""
@@ -1353,9 +1631,9 @@ class RightSidebar(QWidget):
                 color: {COLORS['text_dim']};
                 border: none;
                 border-bottom: 2px solid transparent;
-                padding: 12px 20px;
+                padding: 12px 12px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
                 letter-spacing: 1px;
                 text-transform: uppercase;
             }}
@@ -1373,21 +1651,25 @@ class RightSidebar(QWidget):
         self.setup_button.setStyleSheet(tab_style)
         self.graph_button.setStyleSheet(tab_style)
         self.image_button.setStyleSheet(tab_style)
+        self.video_button.setStyleSheet(tab_style)
         
         # Make buttons checkable for tab behavior
         self.setup_button.setCheckable(True)
         self.graph_button.setCheckable(True)
         self.image_button.setCheckable(True)
+        self.video_button.setCheckable(True)
         self.setup_button.setChecked(True)  # Start with setup tab active
         
         # Connect tab buttons
         self.setup_button.clicked.connect(lambda: self.switch_tab(0))
         self.graph_button.clicked.connect(lambda: self.switch_tab(1))
         self.image_button.clicked.connect(lambda: self.switch_tab(2))
+        self.video_button.clicked.connect(lambda: self.switch_tab(3))
         
         tab_layout.addWidget(self.setup_button)
         tab_layout.addWidget(self.graph_button)
         tab_layout.addWidget(self.image_button)
+        tab_layout.addWidget(self.video_button)
         
         layout.addWidget(tab_container)
         
@@ -1405,11 +1687,13 @@ class RightSidebar(QWidget):
         self.control_panel = ControlPanel()
         self.network_pane = NetworkPane()
         self.image_preview_pane = ImagePreviewPane()
+        self.video_preview_pane = VideoPreviewPane()
         
         # Add pages to stack
         self.stack.addWidget(self.control_panel)
         self.stack.addWidget(self.network_pane)
         self.stack.addWidget(self.image_preview_pane)
+        self.stack.addWidget(self.video_preview_pane)
         
         layout.addWidget(self.stack, 1)  # Stretch to fill
         
@@ -1424,11 +1708,17 @@ class RightSidebar(QWidget):
         self.setup_button.setChecked(index == 0)
         self.graph_button.setChecked(index == 1)
         self.image_button.setChecked(index == 2)
+        self.video_button.setChecked(index == 3)
     
     def update_image_preview(self, image_path):
         """Update the image preview pane with a new image"""
         if hasattr(self, 'image_preview_pane'):
             self.image_preview_pane.set_image(image_path)
+    
+    def update_video_preview(self, video_path):
+        """Update the video preview pane with a new video"""
+        if hasattr(self, 'video_preview_pane'):
+            self.video_preview_pane.set_video(video_path)
     
     def add_node(self, node_id, label, node_type):
         """Forward to network pane"""
@@ -1702,17 +1992,11 @@ class ControlPanel(QWidget):
         self.export_button = self.create_glow_button("📡 EXPORT", COLORS['accent_purple'])
         action_layout.addWidget(self.export_button)
         
-        # View HTML button with glow
+        # View HTML button with glow - opens the styled conversation
         self.view_html_button = self.create_glow_button("🌐 VIEW HTML", COLORS['accent_green'])
-        self.view_html_button.clicked.connect(lambda: open_html_in_browser("shared_document.html"))
+        self.view_html_button.setToolTip("View conversation as shareable HTML")
+        self.view_html_button.clicked.connect(lambda: open_html_in_browser("conversation_full.html"))
         action_layout.addWidget(self.view_html_button)
-        
-        # View Full HTML button
-        self.view_full_html_button = QPushButton("🌐 FULL HTML")
-        self.view_full_html_button.setStyleSheet(self.get_cyberpunk_button_style(COLORS['accent_yellow']))
-        self.view_full_html_button.setToolTip("View the full conversation in dark mode")
-        self.view_full_html_button.clicked.connect(lambda: open_html_in_browser("conversation_full.html"))
-        action_layout.addWidget(self.view_full_html_button)
         
         controls_layout.addWidget(action_container)
         
@@ -2396,11 +2680,13 @@ class ConversationPane(QWidget):
             # Handle generated images with special styling
             if message.get('_type') == 'generated_image':
                 creator = message.get('ai_name', 'AI')
+                model = message.get('model', '')
+                creator_display = f"{creator} ({model})" if model else creator
                 if generated_image_path and os.path.exists(generated_image_path):
                     file_url = f"file:///{generated_image_path.replace(os.sep, '/')}"
                     html += f'<div class="message" style="background-color: #1a1a2e; border: 1px solid {COLORS["accent_purple"]}; text-align: center; padding: 12px;">'
-                    html += f'<div style="color: {COLORS["accent_purple"]}; margin-bottom: 8px;">🎨 {creator} created an image</div>'
-                    html += f'<img src="{file_url}" style="max-width: 450px; border-radius: 8px;" />'
+                    html += f'<div style="color: {COLORS["accent_purple"]}; margin-bottom: 8px;">🎨 {creator_display} created an image</div>'
+                    html += f'<img src="{file_url}" style="max-width: 100%; border-radius: 8px;" />'
                     if text_content:
                         # Extract just the prompt part
                         html += f'<div style="color: {COLORS["text_dim"]}; font-size: 9pt; margin-top: 8px; font-style: italic;">{text_content}</div>'

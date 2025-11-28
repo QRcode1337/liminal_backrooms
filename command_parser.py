@@ -38,12 +38,14 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
     cleaned = response_text
     
     # Define patterns for each command type
-    # Using non-greedy matching and allowing for varied quote styles
+    # Using patterns that match opening quote to same closing quote
+    # Double-quoted strings can contain single quotes and vice versa
     patterns = {
-        'image': r'!image\s+["\']([^"\']+)["\']',
-        'video': r'!video\s+["\']([^"\']+)["\']',
-        'add_ai': r'!add_ai\s+["\']([^"\']+)["\'](?:\s+["\']([^"\']*)["\'])?',
-        'remove_ai': r'!remove_ai\s+["\']([^"\']+)["\']',
+        # Match "..." (can contain ') or '...' (can contain ")
+        'image': r'!image\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'video': r'!video\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'add_ai': r'!add_ai\s+(?:"([^"]+)"|\'([^\']+)\')(?:\s+(?:"([^"]*)"|\'([^\']*)\'))?',
+        'remove_ai': r'!remove_ai\s+(?:"([^"]+)"|\'([^\']+)\')',
         'list_models': r'!list_models\b',
         # 'branch' command disabled - underlying function needs work
         'mute_self': r'!mute_self\b',
@@ -54,17 +56,27 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
             # Build params dict based on action type
             groups = match.groups()
             
+            # Helper to get first non-None group (handles alternation patterns)
+            def get_first_value(*indices):
+                for i in indices:
+                    if i < len(groups) and groups[i] is not None:
+                        return groups[i]
+                return None
+            
             if action == 'image':
-                params = {'prompt': groups[0]}
+                # Groups 0 or 1 (double or single quoted)
+                params = {'prompt': get_first_value(0, 1)}
             elif action == 'video':
-                params = {'prompt': groups[0]}
+                # Groups 0 or 1 (double or single quoted)
+                params = {'prompt': get_first_value(0, 1)}
             elif action == 'add_ai':
+                # Model: groups 0 or 1, Persona: groups 2 or 3
                 params = {
-                    'model': groups[0],
-                    'persona': groups[1] if len(groups) > 1 and groups[1] else None
+                    'model': get_first_value(0, 1),
+                    'persona': get_first_value(2, 3)
                 }
             elif action == 'remove_ai':
-                params = {'target': groups[0]}
+                params = {'target': get_first_value(0, 1)}
             elif action == 'list_models':
                 params = {}
             elif action == 'mute_self':

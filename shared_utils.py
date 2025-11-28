@@ -251,8 +251,13 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         
-        def convert_to_openai_format(content):
-            """Convert Anthropic-style image format to OpenAI/OpenRouter format"""
+        def convert_to_openai_format(content, include_images=True):
+            """Convert Anthropic-style image format to OpenAI/OpenRouter format.
+            
+            Args:
+                content: The message content (string or list)
+                include_images: If False, strip image content and keep only text
+            """
             if not isinstance(content, list):
                 return content
             
@@ -261,118 +266,207 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
                 if part.get('type') == 'text':
                     converted.append({"type": "text", "text": part.get('text', '')})
                 elif part.get('type') == 'image':
-                    # Convert Anthropic format to OpenAI format
-                    source = part.get('source', {})
-                    if source.get('type') == 'base64':
-                        media_type = source.get('media_type', 'image/png')
-                        data = source.get('data', '')
-                        converted.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{media_type};base64,{data}"
-                            }
-                        })
+                    if include_images:
+                        # Convert Anthropic format to OpenAI format
+                        source = part.get('source', {})
+                        if source.get('type') == 'base64':
+                            media_type = source.get('media_type', 'image/png')
+                            data = source.get('data', '')
+                            converted.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{data}"
+                                }
+                            })
+                    # If not including images, we skip this part (text description is already there)
                 elif part.get('type') == 'image_url':
-                    # Already in OpenAI format
-                    converted.append(part)
+                    if include_images:
+                        # Already in OpenAI format
+                        converted.append(part)
                 else:
                     # Pass through unknown types
                     converted.append(part)
+            
+            # If we stripped images and only have one text element, simplify to string
+            if not include_images and len(converted) == 1 and converted[0].get('type') == 'text':
+                return converted[0]['text']
+            elif not include_images and len(converted) == 0:
+                return ""
+            
             return converted
-            
-        for msg in conversation_history:
-            if msg["role"] != "system":  # Skip system prompts
-                # Convert image format for OpenRouter compatibility
-                messages.append({
-                    "role": msg["role"],
-                    "content": convert_to_openai_format(msg["content"])
-                })
         
-        # Also convert the prompt if it's structured content
-        messages.append({"role": "user", "content": convert_to_openai_format(prompt)})
+        def build_messages(include_images=True):
+            """Build the messages list, optionally stripping images."""
+            msgs = []
+            if system_prompt:
+                msgs.append({"role": "system", "content": system_prompt})
+            
+            for msg in conversation_history:
+                if msg["role"] != "system":  # Skip system prompts
+                    msgs.append({
+                        "role": msg["role"],
+                        "content": convert_to_openai_format(msg["content"], include_images)
+                    })
+            
+            # Also convert the prompt if it's structured content
+            msgs.append({"role": "user", "content": convert_to_openai_format(prompt, include_images)})
+            return msgs
         
-        payload = {
-            "model": openrouter_model,  # Using normalized model name for OpenRouter
-            "messages": messages,
-            "temperature": 1,
-            "max_tokens": 4000,
-            "stream": stream_callback is not None  # Enable streaming if callback provided
-        }
-        
-        print(f"\nSending to OpenRouter:")
-        print(f"Model: {model}")
-        print(f"Messages: {json.dumps(messages, indent=2)}")
-        
-        if stream_callback:
-            # Streaming mode
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=180,
-                stream=True
-            )
+        def make_api_call(include_images=True):
+            """Make the API call, returns (success, result_or_error)"""
+            msgs = build_messages(include_images=include_images)
             
-            print(f"Response status: {response.status_code}")
+            payload = {
+                "model": openrouter_model,
+                "messages": msgs,
+                "temperature": 1,
+                "max_tokens": 4000,
+                "stream": stream_callback is not None
+            }
             
-            if response.status_code == 200:
-                full_response = ""
-                for line in response.iter_lines():
-                    if line:
-                        line_text = line.decode('utf-8')
-                        if line_text.startswith('data: '):
-                            json_str = line_text[6:]  # Remove 'data: ' prefix
-                            if json_str.strip() == '[DONE]':
-                                break
-                            try:
-                                chunk_data = json.loads(json_str)
-                                if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
-                                    delta = chunk_data['choices'][0].get('delta', {})
-                                    content = delta.get('content', '')
-                                    if content:
-                                        full_response += content
-                                        stream_callback(content)
-                            except json.JSONDecodeError:
-                                continue
-                return full_response
-            else:
-                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
-                print(error_msg)
-                return f"Error: {error_msg}"
-        else:
-            # Non-streaming mode (original behavior)
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60  # Add timeout
-            )
-            
-            print(f"Response status: {response.status_code}")
-            print(f"Response headers: {response.headers}")
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                print(f"Response data: {json.dumps(response_data, indent=2)}")
-                
-                if 'choices' in response_data and len(response_data['choices']) > 0:
-                    message = response_data['choices'][0].get('message', {})
-                    if message and 'content' in message:
-                        return message['content']
-                    else:
-                        print(f"Unexpected message structure: {message}")
-                        return None
+            print(f"\nSending to OpenRouter:")
+            print(f"Model: {model}")
+            print(f"Include images: {include_images}")
+            # Log message summary (avoid huge base64 dumps)
+            for i, m in enumerate(msgs):
+                content = m.get('content', '')
+                if isinstance(content, list):
+                    parts_summary = [p.get('type', 'unknown') for p in content]
+                    print(f"  [{i}] {m.get('role')}: [structured: {parts_summary}]")
                 else:
-                    print(f"Unexpected response structure: {response_data}")
-                    return None
+                    preview = str(content)[:80] + "..." if len(str(content)) > 80 else content
+                    print(f"  [{i}] {m.get('role')}: {preview}")
+            
+            if stream_callback:
+                # Streaming mode
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=180,
+                    stream=True
+                )
+                
+                print(f"Response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    full_response = ""
+                    chunk_count = 0
+                    last_finish_reason = None
+                    debug_chunks = []  # Store first few chunks for debugging
+                    for line in response.iter_lines():
+                        if line:
+                            line_text = line.decode('utf-8')
+                            if line_text.startswith('data: '):
+                                json_str = line_text[6:]
+                                if json_str.strip() == '[DONE]':
+                                    break
+                                try:
+                                    chunk_data = json.loads(json_str)
+                                    # Store first 5 chunks for debugging
+                                    if len(debug_chunks) < 5:
+                                        debug_chunks.append(chunk_data)
+                                    if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                        choice = chunk_data['choices'][0]
+                                        delta = choice.get('delta', {})
+                                        content = delta.get('content', '')
+                                        last_finish_reason = choice.get('finish_reason')
+                                        if content:
+                                            full_response += content
+                                            stream_callback(content)
+                                        chunk_count += 1
+                                except json.JSONDecodeError:
+                                    continue
+                    # Log if response is empty
+                    if not full_response or not full_response.strip():
+                        print(f"[OpenRouter STREAM] Empty response from {model}", flush=True)
+                        print(f"[OpenRouter STREAM]   Chunks received: {chunk_count}", flush=True)
+                        print(f"[OpenRouter STREAM]   Last finish_reason: {last_finish_reason}", flush=True)
+                        print(f"[OpenRouter STREAM]   Response repr: {repr(full_response)}", flush=True)
+                        # Print the actual chunk data for debugging
+                        for i, chunk in enumerate(debug_chunks):
+                            print(f"[OpenRouter STREAM]   Chunk {i}: {json.dumps(chunk)[:300]}", flush=True)
+                    return True, full_response
+                else:
+                    return False, (response.status_code, response.text)
             else:
-                error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
-                print(error_msg)
-                if response.status_code == 404:
-                    print("Model not found. Please check if the model name is correct.")
-                elif response.status_code == 401:
-                    print("Authentication error. Please check your API key.")
-                return f"Error: {error_msg}"
+                # Non-streaming mode
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=60
+                )
+                
+                print(f"Response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    response_data = response.json()
+                    # Debug: log full response structure for empty responses
+                    if 'choices' in response_data and len(response_data['choices']) > 0:
+                        choice = response_data['choices'][0]
+                        message = choice.get('message', {})
+                        content = message.get('content', '') if message else ''
+                        if content and content.strip():
+                            return True, content
+                        else:
+                            # Log detailed info about empty response (avoiding base64)
+                            import sys
+                            print(f"[OpenRouter] Empty content from model: {model}", flush=True)
+                            print(f"[OpenRouter]   Choice keys: {list(choice.keys())}", flush=True)
+                            print(f"[OpenRouter]   Message keys: {list(message.keys()) if message else 'None'}", flush=True)
+                            print(f"[OpenRouter]   Finish reason: {choice.get('finish_reason', 'unknown')}", flush=True)
+                            print(f"[OpenRouter]   Content type: {type(content).__name__}, len: {len(content) if content else 0}", flush=True)
+                            print(f"[OpenRouter]   Content repr: {repr(content)}", flush=True)
+                            # Check for refusal or other indicators
+                            if message.get('refusal'):
+                                print(f"[OpenRouter]   Refusal: {message.get('refusal')}", flush=True)
+                            # Check for tool_calls that might indicate the model is doing something else
+                            if message.get('tool_calls'):
+                                print(f"[OpenRouter]   Tool calls: {len(message.get('tool_calls'))} call(s)", flush=True)
+                            sys.stdout.flush()
+                            return True, None
+                    else:
+                        print(f"[OpenRouter] No choices in response. Keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'non-dict'}")
+                    return True, None
+                else:
+                    return False, (response.status_code, response.text)
+        
+        # Try with images first
+        success, result = make_api_call(include_images=True)
+        print(f"[OpenRouter] First call result - success: {success}, result type: {type(result).__name__}, result: {repr(result)[:100] if result else 'None'}", flush=True)
+        
+        if success:
+            # Check for empty response and retry once
+            if result is None or (isinstance(result, str) and not result.strip()):
+                print(f"[OpenRouter] WARNING: Model {model} returned empty response, retrying...", flush=True)
+                import time
+                time.sleep(1)
+                success, result = make_api_call(include_images=True)
+                print(f"[OpenRouter] Retry result - success: {success}, result type: {type(result).__name__}, result: {repr(result)[:100] if result else 'None'}", flush=True)
+                if success and result and (not isinstance(result, str) or result.strip()):
+                    return result
+                print(f"[OpenRouter] WARNING: Model {model} returned empty response again after retry", flush=True)
+                return "[Model returned empty response - it may be experiencing issues]"
+            return result
+        
+        # Check if error is due to model not supporting images
+        status_code, error_text = result
+        if status_code == 404 and "support image" in error_text.lower():
+            print(f"[OpenRouter] Model {model} doesn't support images, retrying without images...")
+            success, result = make_api_call(include_images=False)
+            if success:
+                return result
+            status_code, error_text = result
+        
+        # Handle other errors
+        error_msg = f"OpenRouter API error {status_code}: {error_text}"
+        print(error_msg)
+        if status_code == 404:
+            print("Model not found or doesn't support this request type.")
+        elif status_code == 401:
+            print("Authentication error. Please check your API key.")
+        return f"Error: {error_msg}"
             
     except requests.exceptions.Timeout:
         print("Request timed out. The server took too long to respond.")
@@ -401,10 +495,10 @@ def call_replicate_api(prompt, conversation_history, model, gui=None):
         
         image_url = str(output)
         
-        # Save the image locally
+        # Save the image locally (include microseconds to avoid collisions)
         image_dir = Path("images")
         image_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         image_path = image_dir / f"generated_{timestamp}.jpg"
         
         response = requests.get(image_url)
@@ -611,7 +705,13 @@ def create_memory_prompt(conversations):
 def print_conversation_state(conversation):
     print("Current conversation state:")
     for message in conversation:
-        print(f"{message['role']}: {message['content'][:50]}...")  # Print first 50 characters of each message
+        content = message.get('content', '')
+        # Safely preview content - handle both string and list (structured) content
+        if isinstance(content, str):
+            preview = content[:50] + "..." if len(content) > 50 else content
+        else:
+            preview = f"[structured content with {len(content)} parts]"
+        print(f"{message['role']}: {preview}")
 
 def call_claude_vision_api(image_url):
     """Have Claude analyze the generated image"""
@@ -659,7 +759,7 @@ def list_together_models():
             models = response.json()
             print(json.dumps(models, indent=2))
         else:
-            print(f"Error Response: {response.text}")
+            print(f"Error Response: {response.text[:500]}..." if len(response.text) > 500 else f"Error Response: {response.text}")
             
     except Exception as e:
         print(f"Error listing models: {str(e)}")
@@ -683,7 +783,7 @@ def start_together_model(model_id):
         )
         
         print(f"Start request status: {response.status_code}")
-        print(f"Response: {response.text}")
+        print(f"Response: {response.text[:200]}..." if len(response.text) > 200 else f"Response: {response.text}")
         
         if response.status_code == 200:
             print("Model start request successful")
@@ -735,7 +835,7 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
             return response_data['choices'][0]['message']['content']
         else:
             print(f"Together API Error Status: {response.status_code}")
-            print(f"Response Body: {response.text}")
+            print(f"Response Body: {response.text[:500]}..." if len(response.text) > 500 else f"Response Body: {response.text}")
             return None
             
     except Exception as e:
@@ -769,8 +869,8 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
         image_dir = Path("images")
         image_dir.mkdir(exist_ok=True)
         
-        # Create a timestamp for the image filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Create a timestamp for the image filename (include microseconds to avoid collisions)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         
         # Call OpenRouter API for image generation
         headers = {
@@ -868,13 +968,13 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                                 }
                 
                 # No images in response
-                print(f"No images in response. Message: {message}")
+                print(f"No images in response. Message keys: {list(message.keys()) if isinstance(message, dict) else 'non-dict'}")
                 return {
                     "success": False,
                     "error": "No images in API response"
                 }
             else:
-                print(f"No choices in response: {result}")
+                print(f"No choices in response. Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 return {
                     "success": False,
                     "error": "No choices in API response"
@@ -985,7 +1085,7 @@ def generate_video_with_sora(
             return {"success": False, "video_id": video_id, "status": status, "error": f"Download failed {rc.status_code}: {rc.text}"}
 
         videos_dir = ensure_videos_dir()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         safe_snippet = re.sub(r"[^a-zA-Z0-9_-]", "_", prompt[:40]) or "video"
         out_path = videos_dir / f"{timestamp}_{safe_snippet}.mp4"
         with open(out_path, "wb") as f:

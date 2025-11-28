@@ -59,6 +59,10 @@ class ImageUpdateSignals(QObject):
     """Signals for updating UI with generated images from background threads"""
     image_ready = pyqtSignal(dict, str)  # (image_message, image_path)
 
+class VideoUpdateSignals(QObject):
+    """Signals for updating UI with generated videos from background threads"""
+    video_ready = pyqtSignal(str, str)  # (video_path, prompt)
+
 class Worker(QRunnable):
     """Worker thread for processing AI turns using QThreadPool"""
     
@@ -78,6 +82,7 @@ class Worker(QRunnable):
     @pyqtSlot()
     def run(self):
         """Process the AI turn when the thread is started"""
+        print(f"[Worker] >>> Starting run() for {self.ai_name} ({self.model})")
         try:
             # Emit progress update
             self.signals.progress.emit(f"Processing {self.ai_name} turn with {self.model}...")
@@ -87,6 +92,7 @@ class Worker(QRunnable):
                 self.signals.streaming_chunk.emit(self.ai_name, chunk)
             
             # Process the turn with streaming
+            print(f"[Worker] Calling ai_turn for {self.ai_name}...")
             result = ai_turn(
                 self.ai_name,
                 self.conversation,
@@ -95,24 +101,31 @@ class Worker(QRunnable):
                 gui=self.gui,
                 streaming_callback=stream_chunk
             )
+            print(f"[Worker] ai_turn completed for {self.ai_name}, result type: {type(result)}")
             
             # Emit both the text response and the full result object
             if isinstance(result, dict):
                 response_content = result.get('content', '')
+                print(f"[Worker] Emitting response for {self.ai_name}, content length: {len(response_content) if response_content else 0}")
                 # Emit the simple text response for backward compatibility
                 self.signals.response.emit(self.ai_name, response_content)
                 # Also emit the full result object for HTML contribution processing
                 self.signals.result.emit(self.ai_name, result)
             else:
                 # Handle simple string responses
+                print(f"[Worker] Emitting string response for {self.ai_name}")
                 self.signals.response.emit(self.ai_name, result if result else "")
                 self.signals.result.emit(self.ai_name, {"content": result, "model": self.model})
             
             # Emit finished signal
+            print(f"[Worker] <<< Finished run() for {self.ai_name}, emitting finished signal")
             self.signals.finished.emit()
             
         except Exception as e:
             # Emit error signal
+            print(f"[Worker] !!! ERROR in run() for {self.ai_name}: {e}")
+            import traceback
+            traceback.print_exc()
             self.signals.error.emit(str(e))
             # Still emit finished signal even if there's an error
             self.signals.finished.emit()
@@ -239,7 +252,13 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         for existing in filtered_conversation:
             if existing.get("content") == msg.get("content"):
                 is_duplicate = True
-                print(f"Skipping duplicate message: {msg.get('content')[:30]}...")
+                content = msg.get('content', '')
+                # Safely preview content - handle both string and list (structured) content
+                if isinstance(content, str):
+                    preview = content[:30] + "..." if len(content) > 30 else content
+                else:
+                    preview = f"[structured content with {len(content)} parts]"
+                print(f"Skipping duplicate message: {preview}")
                 break
                 
         if not is_duplicate:
@@ -377,9 +396,9 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         print(f"Error loading memories: {e}")
         print(f"Loaded 0 memories for {ai_name}")
     
-    # Display the final processed messages for debugging
+    # Display the final processed messages for debugging (avoid printing base64 images)
     print(f"Sending to Claude:")
-    print(f"Messages: {json.dumps(messages, indent=2)}")
+    print(f"Messages: {len(messages)} message(s)")
     
     # Display the prompt
     print(f"--- Prompt to {model} ({ai_name}) ---")
@@ -402,13 +421,10 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
             if not prompt_content or not prompt_content.strip():
                 prompt_content = "A short abstract motion graphic in warm colors"
 
-            # Optional duration/size via env
-            sora_seconds_env = os.getenv("SORA_SECONDS", "")
-            sora_size = os.getenv("SORA_SIZE", "") or None
-            try:
-                sora_seconds = int(sora_seconds_env) if sora_seconds_env else None
-            except ValueError:
-                sora_seconds = None
+            # Use config values with env var override
+            from config import SORA_SECONDS, SORA_SIZE
+            sora_seconds = int(os.getenv("SORA_SECONDS", str(SORA_SECONDS)))
+            sora_size = os.getenv("SORA_SIZE", SORA_SIZE) or None
 
             print(f"[Sora] Starting job with seconds={sora_seconds} size={sora_size}")
             video_result = generate_video_with_sora(
@@ -574,10 +590,9 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 # Call OpenRouter API with streaming support
                 response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
                 
-                print(f"Raw {model} Response:")
-                print("-" * 50)
-                print(response)
-                print("-" * 50)
+                # Avoid printing full response which could be large
+                response_preview = str(response)[:200] + "..." if response and len(str(response)) > 200 else response
+                print(f"Raw {model} Response: {response_preview}")
                 
                 result = {
                     "role": "assistant",
@@ -631,6 +646,28 @@ class ConversationManager:
         # Set up image update signals for thread-safe UI updates
         self.image_signals = ImageUpdateSignals()
         self.image_signals.image_ready.connect(self._on_image_ready)
+        
+        # Set up video update signals for thread-safe UI updates
+        self.video_signals = VideoUpdateSignals()
+        self.video_signals.video_ready.connect(self._on_video_ready)
+        
+    def _on_video_ready(self, video_path: str, prompt: str):
+        """Handle video ready signal - runs on main thread"""
+        try:
+            print(f"[Agent] Video ready, updating UI: {video_path}")
+            # Update the video preview panel
+            if hasattr(self.app, 'right_sidebar') and hasattr(self.app.right_sidebar, 'update_video_preview'):
+                self.app.right_sidebar.update_video_preview(video_path)
+            
+            # Update status bar notification with prompt (truncated for display)
+            if hasattr(self.app, 'notification_label'):
+                # Truncate long prompts for status bar
+                display_prompt = prompt[:100] + "..." if len(prompt) > 100 else prompt
+                self.app.notification_label.setText(f"🎬 Video completed: {display_prompt}")
+        except Exception as e:
+            print(f"[Agent] Error handling video ready: {e}")
+            import traceback
+            traceback.print_exc()
         
     def _on_image_ready(self, image_message: dict, image_path: str):
         """Handle image ready signal - runs on main thread"""
@@ -781,10 +818,10 @@ class ConversationManager:
             # Skip muted AIs (they skip their next turn)
             if ai_name in muted_ais:
                 print(f"[Mute] {ai_name} is muted, skipping this turn")
-                # Add a notification to the conversation
+                # Add a notification to the conversation showing the command was used
                 mute_notification = {
                     "role": "user",
-                    "content": f"[{ai_name} is listening silently this turn...]",
+                    "content": f"[{ai_name} used !mute_self - listening this turn]",
                     "_type": "agent_notification",
                     "hidden": False
                 }
@@ -868,6 +905,8 @@ class ConversationManager:
             self._pending_ais = []  # Clear the queue
             
             print(f"[Agent] Processing {len(pending)} pending AI(s) added during this round")
+            for idx, p in enumerate(pending):
+                print(f"[Agent]   Pending #{idx+1}: {p['ai_name']} -> {p['model']} (invited by {p.get('invited_by', 'unknown')})")
             
             # Get current conversation and prompt pair
             if self.app.active_branch:
@@ -909,8 +948,13 @@ class ConversationManager:
                 pending_workers.append(worker)
             
             # Store remaining workers for sequential processing
+            print(f"[Agent] Created {len(pending_workers)} pending workers")
+            for idx, w in enumerate(pending_workers):
+                print(f"[Agent]   Worker #{idx+1}: {w.ai_name} -> {w.model}")
+            
             if len(pending_workers) > 1:
                 self._remaining_pending_workers = pending_workers[1:]
+                print(f"[Agent] Queued {len(self._remaining_pending_workers)} workers for sequential processing")
                 # First worker chains to process_next
                 pending_workers[0].signals.finished.connect(self._process_next_pending_worker)
             else:
@@ -924,6 +968,7 @@ class ConversationManager:
             self._pending_max_iterations = max_iterations
             
             # Start first pending AI
+            print(f"[Agent] Starting first pending worker: {pending_workers[0].ai_name} ({pending_workers[0].model})")
             self.thread_pool.start(pending_workers[0])
             
             return  # Exit - turn completion will be called after pending AIs finish
@@ -932,8 +977,11 @@ class ConversationManager:
     
     def _process_next_pending_worker(self):
         """Process the next pending worker in the queue."""
+        print(f"[Agent] _process_next_pending_worker called, remaining: {len(getattr(self, '_remaining_pending_workers', []))}")
         if hasattr(self, '_remaining_pending_workers') and self._remaining_pending_workers:
             worker = self._remaining_pending_workers.pop(0)
+            print(f"[Agent] Processing next pending worker: {worker.ai_name} ({worker.model})")
+            print(f"[Agent]   Remaining after pop: {len(self._remaining_pending_workers)}")
             
             # Update conversation to latest state
             if self.app.active_branch:
@@ -945,17 +993,21 @@ class ConversationManager:
             
             # If more workers remain, chain to this function again
             if self._remaining_pending_workers:
+                print(f"[Agent]   More workers remain, will chain to next")
                 worker.signals.finished.connect(self._process_next_pending_worker)
             else:
                 # Last one - finish turn completion
+                print(f"[Agent]   This is the last pending worker")
                 max_iterations = getattr(self, '_pending_max_iterations', 
                     int(self.app.right_sidebar.control_panel.iterations_selector.currentText()))
                 worker.signals.finished.connect(lambda mi=max_iterations: self._finish_turn_completion(mi))
             
             time.sleep(TURN_DELAY)
+            print(f"[Agent] Starting worker: {worker.ai_name}")
             self.thread_pool.start(worker)
         else:
             # No more pending workers, finish turn
+            print(f"[Agent] No remaining pending workers, finishing turn")
             max_iterations = getattr(self, '_pending_max_iterations',
                 int(self.app.right_sidebar.control_panel.iterations_selector.currentText()))
             self._finish_turn_completion(max_iterations)
@@ -1340,14 +1392,11 @@ class ConversationManager:
                     # Inform user in the UI synchronously (short message)
                     self.app.left_pane.append_text("\n[system] Starting Sora video job from AI-1 response...\n", "system")
 
-                    # Read optional overrides from environment
+                    # Use config values with env var override
+                    from config import SORA_SECONDS, SORA_SIZE
                     sora_model = os.getenv("SORA_MODEL", "sora-2")
-                    sora_seconds_env = os.getenv("SORA_SECONDS", "")
-                    sora_size = os.getenv("SORA_SIZE", "") or None
-                    try:
-                        sora_seconds = int(sora_seconds_env) if sora_seconds_env else None
-                    except ValueError:
-                        sora_seconds = None
+                    sora_seconds = int(os.getenv("SORA_SECONDS", str(SORA_SECONDS)))
+                    sora_size = os.getenv("SORA_SIZE", SORA_SIZE) or None
 
                     # Run in background to avoid blocking UI
                     import threading
@@ -1459,12 +1508,17 @@ class ConversationManager:
         else:
             return False, f"Unknown command: {action}"
     
-    def _execute_image_command(self, prompt: str, ai_name: str) -> tuple[bool, str]:
+    def _execute_image_command(self, prompt: str, ai_name: str, model_name: str = None) -> tuple[bool, str]:
         """Execute an image generation command."""
         if not prompt or len(prompt.strip()) < 5:
             return False, "Image prompt too short"
         
-        print(f"[Agent] Generating image for {ai_name}: {prompt[:100]}...")
+        # Get model name if not provided
+        if not model_name:
+            ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+            model_name = self.get_model_for_ai(ai_number)
+        
+        print(f"[Agent] Generating image for {ai_name} ({model_name}): {prompt[:100]}...")
         
         # Run image generation in background thread to avoid blocking UI
         import threading
@@ -1504,12 +1558,13 @@ class ConversationManager:
                         print(f"[Agent] Detected image media type: {media_type}")
                         
                         # Create image message for conversation context
+                        # Keep the !image command visible so AIs remember the syntax
                         image_message = {
                             "role": "user",  # Present as user message so AIs see it in their context
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"[{ai_name} generated an image: \"{prompt}\"]"
+                                    "text": f"[{ai_name} ({model_name})]: !image \"{prompt}\"\n<image attached>"
                                 },
                                 {
                                     "type": "image",
@@ -1522,7 +1577,8 @@ class ConversationManager:
                             ],
                             "generated_image_path": image_path,
                             "_type": "generated_image",
-                            "ai_name": ai_name
+                            "ai_name": ai_name,
+                            "model": model_name
                         }
                         
                         # Emit signal to update UI on main thread
@@ -1539,7 +1595,7 @@ class ConversationManager:
                 print(f"[Agent] Image generation exception: {e}")
         
         threading.Thread(target=_run_image_job, daemon=True).start()
-        return True, f"🎨 {ai_name} is creating an image..."
+        return True, f"🎨 [{ai_name} ({model_name})]: !image \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
     
     def _execute_video_command(self, prompt: str, ai_name: str) -> tuple[bool, str]:
         """Execute a video generation command."""
@@ -1550,13 +1606,23 @@ class ConversationManager:
         
         # Run video generation in background thread to avoid blocking
         import threading
+        from config import SORA_SECONDS, SORA_SIZE
         
         def _run_video_job():
             from shared_utils import generate_video_with_sora
             sora_model = os.getenv("SORA_MODEL", "sora-2")
+            
+            # Use config values, with env var override
+            sora_seconds = int(os.getenv("SORA_SECONDS", str(SORA_SECONDS)))
+            sora_size = os.getenv("SORA_SIZE", SORA_SIZE) or None
+            
+            print(f"[Agent] Sora settings: seconds={sora_seconds}, size={sora_size}")
+            
             result = generate_video_with_sora(
                 prompt=prompt,
                 model=sora_model,
+                seconds=sora_seconds,
+                size=sora_size,
                 poll_interval_seconds=5.0,
             )
             if result.get("success"):
@@ -1564,12 +1630,15 @@ class ConversationManager:
                 print(f"[Agent] Video completed: {video_path}")
                 # Track video in session
                 if hasattr(self.app, 'session_videos') and video_path:
-                    self.app.session_videos.append(video_path)
+                    self.app.session_videos.append(str(video_path))
+                    # Emit signal to update video preview on main thread (include prompt for status bar)
+                    if hasattr(self, 'video_signals'):
+                        self.video_signals.video_ready.emit(str(video_path), prompt)
             else:
                 print(f"[Agent] Video failed: {result.get('error')}")
         
         threading.Thread(target=_run_video_job, daemon=True).start()
-        return True, f"🎬 {ai_name} is creating a video (this takes a while)..."
+        return True, f"🎬 [{ai_name}]: !video \"{prompt[:50]}{'...' if len(prompt) > 50 else ''}\" (generating...)"
     
     def _execute_add_ai_command(self, model_name: str, persona: str, requesting_ai: str) -> tuple[bool, str]:
         """Execute an add AI participant command."""
@@ -1637,10 +1706,13 @@ class ConversationManager:
             'invited_by': requesting_ai
         })
         print(f"[Agent] Queued AI-{new_num} ({actual_model}) to join current round")
+        print(f"[Agent] Current pending queue: {[p['ai_name'] + ' -> ' + p['model'] for p in self._pending_ais]}")
         
-        # Create a friendly notification message
-        persona_note = f' as "{persona}"' if persona else ""
-        return True, f"✨ {requesting_ai} invited {actual_model} to the conversation{persona_note}"
+        # Create a friendly notification message that shows the command syntax
+        if persona:
+            return True, f"✨ [{requesting_ai}]: !add_ai \"{actual_model}\" \"{persona}\""
+        else:
+            return True, f"✨ [{requesting_ai}]: !add_ai \"{actual_model}\""
     
     def _execute_remove_ai_command(self, target: str, requesting_ai: str) -> tuple[bool, str]:
         """Execute a remove AI participant command (requires consensus in future)."""
@@ -1667,7 +1739,7 @@ class ConversationManager:
             self.app.muted_ais = set()
         
         self.app.muted_ais.add(ai_name)
-        return True, f"🔇 {ai_name} is listening..."
+        return True, f"🔇 [{ai_name}]: !mute_self"
     
     def get_model_for_ai(self, ai_number):
         """Get the selected model name for the AI by number (1-5)"""
@@ -1994,149 +2066,302 @@ class ConversationManager:
             html_content = """<!DOCTYPE html>
 <html>
 <head>
-    <title>Full Conversation</title>
+    <title>Liminal Backrooms</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-panel: #12121a;
+            --bg-message: #1a1a24;
+            --border-glow: #2a2a3a;
+            --text-primary: #e8e8f0;
+            --text-dim: #8888a0;
+            --accent-cyan: #00ffd0;
+            --accent-purple: #b388ff;
+            --accent-blue: #4fc3f7;
+            --accent-orange: #ffab40;
+            --accent-pink: #ff4081;
+        }
+        
+        * { box-sizing: border-box; }
+        
         body { 
-            font-family: 'Segoe UI', Arial, sans-serif; 
+            font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
             margin: 0; 
             padding: 0;
-            line-height: 1.6; 
-            color: #b8c2cc;
-            background-color: #1a1a1d;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 30px;
-            background-color: #202124;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            line-height: 1.7; 
+            color: var(--text-primary);
+            background: var(--bg-dark);
+            background-image: 
+                radial-gradient(ellipse at top, rgba(0, 255, 208, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at bottom, rgba(179, 136, 255, 0.03) 0%, transparent 50%);
             min-height: 100vh;
         }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
         header {
             text-align: center;
-            margin-bottom: 40px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #333;
+            margin-bottom: 50px;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, rgba(0, 255, 208, 0.05) 0%, rgba(179, 136, 255, 0.05) 100%);
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            position: relative;
+            overflow: hidden;
         }
+        
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-cyan), var(--accent-purple), transparent);
+        }
+        
         h1 { 
-            color: #4ec9b0; 
-            font-size: 2.5em;
-            margin-bottom: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-cyan);
+            font-size: 2.2em;
+            margin: 0 0 10px 0;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-shadow: 0 0 30px rgba(0, 255, 208, 0.3);
         }
+        
         .subtitle {
-            color: #9ba1a6;
-            font-size: 1.2em;
+            color: var(--text-dim);
+            font-size: 0.95em;
             font-weight: 300;
+            letter-spacing: 1px;
         }
+        
         .message { 
-            margin-bottom: 40px; 
-            padding: 20px; 
-            border-radius: 4px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            display: flex;
-            flex-direction: row;
-            flex-wrap: wrap;
+            margin-bottom: 30px; 
+            padding: 24px;
+            border-radius: 12px;
+            background: var(--bg-message);
+            border: 1px solid var(--border-glow);
+            position: relative;
+            transition: all 0.2s ease;
         }
+        
+        .message:hover {
+            border-color: rgba(0, 255, 208, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        
         .message-content {
-            flex: 1;
-            min-width: 60%;
+            width: 100%;
         }
+        
         .message-image {
-            flex: 0 0 35%;
-            margin-left: 20px;
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
+            width: 100%;
+            margin-top: 20px;
         }
+        
         .message-image img {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid var(--border-glow);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        .generated-image-container {
+            background: linear-gradient(135deg, rgba(179, 136, 255, 0.08) 0%, rgba(255, 64, 129, 0.08) 100%);
+            border: 1px solid rgba(179, 136, 255, 0.3);
+            border-radius: 16px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .generated-image-container img {
+            width: 100%;
             max-width: 100%;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            border-radius: 12px;
+            margin-top: 12px;
         }
+        
+        .generated-image-label {
+            color: var(--accent-purple);
+            font-size: 0.9em;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .generated-image-prompt {
+            color: var(--text-dim);
+            font-size: 0.85em;
+            font-style: italic;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(179, 136, 255, 0.2);
+        }
+        
         .user {
-            background-color: #2a2a30;
-            border-left: 4px solid #4ec9b0;
+            border-left: 3px solid var(--accent-cyan);
         }
+        
         .assistant {
-            background-color: #2c2c35; 
-            border-left: 4px solid #569cd6;
+            border-left: 3px solid var(--accent-purple);
         }
+        
         .system {
-            background-color: #262630;
-            border-left: 4px solid #ce9178;
+            background: rgba(255, 171, 64, 0.05);
+            border-left: 3px solid var(--accent-orange);
             font-style: italic;
         }
+        
         .agent-notification {
-            background-color: #1a2a1a;
-            border-left: 4px solid #4ec9b0;
-            font-style: normal;
-            padding: 12px 20px;
-            margin: 10px 0;
-            font-size: 0.95em;
+            background: linear-gradient(135deg, rgba(0, 255, 208, 0.08) 0%, rgba(79, 195, 247, 0.08) 100%);
+            border: 1px solid rgba(0, 255, 208, 0.2);
+            border-left: 3px solid var(--accent-cyan);
+            padding: 16px 20px;
+            margin: 16px 0;
+            font-size: 0.9em;
+            border-radius: 8px;
         }
+        
         .header { 
-            font-weight: bold; 
-            color: #b8c2cc; 
-            margin-bottom: 10px; 
+            font-weight: 500;
+            margin-bottom: 16px; 
             display: flex;
             align-items: center;
             justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
         }
+        
+        .ai-name {
+            color: var(--accent-purple);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95em;
+        }
+        
+        .model-name {
+            color: var(--text-dim);
+            font-size: 0.85em;
+            font-weight: 400;
+        }
+        
+        .user .ai-name {
+            color: var(--accent-cyan);
+        }
+        
         .timestamp {
-            font-size: 0.8em;
-            color: #9ba1a6;
-            font-weight: normal;
+            font-size: 0.75em;
+            color: var(--text-dim);
+            font-weight: 300;
         }
+        
         .content {
             white-space: pre-wrap;
+            font-size: 0.95em;
+            line-height: 1.8;
         }
-        /* Greentext styling */
+        
         .greentext {
             color: #789922;
-            font-family: monospace;
+            font-family: 'JetBrains Mono', monospace;
         }
-        p {
-            margin: 0.5em 0;
-        }
+        
+        p { margin: 0.6em 0; }
+        
         code { 
-            background: #333; 
-            padding: 2px 4px; 
-            border-radius: 3px; 
-            font-family: 'Consolas', 'Monaco', monospace;
-            color: #dcdcaa;
-        }
-        pre { 
-            background: #2d2d2d; 
-            padding: 15px; 
-            border-radius: 5px; 
-            overflow-x: auto; 
-            font-family: 'Consolas', 'Monaco', monospace;
-            margin: 20px 0;
-            border: 1px solid #444;
-            color: #d4d4d4;
-        }
-        .html-contribution {
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px dashed #444;
-            color: #569cd6;
-            font-style: italic;
-        }
-        footer {
-            margin-top: 50px;
-            text-align: center;
-            color: #9ba1a6;
+            background: rgba(0, 255, 208, 0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
             font-size: 0.9em;
-            padding-top: 20px;
-            border-top: 1px solid #333;
+            color: var(--accent-cyan);
+        }
+        
+        pre { 
+            background: var(--bg-dark);
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
+            margin: 20px 0;
+            border: 1px solid var(--border-glow);
+            color: var(--text-primary);
+        }
+        
+        footer {
+            margin-top: 60px;
+            text-align: center;
+            padding: 30px 20px;
+            border-top: 1px solid var(--border-glow);
+        }
+        
+        footer p {
+            color: var(--text-dim);
+            font-size: 0.85em;
+            letter-spacing: 1px;
+        }
+        
+        footer a {
+            color: var(--accent-cyan);
+            text-decoration: none;
+        }
+        
+        /* Share button */
+        .share-bar {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        
+        .share-btn {
+            background: var(--bg-panel);
+            border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
+            transition: all 0.2s ease;
+        }
+        
+        .share-btn:hover {
+            background: rgba(0, 255, 208, 0.1);
+            box-shadow: 0 0 20px rgba(0, 255, 208, 0.2);
+        }
+        
+        @media (max-width: 600px) {
+            .container { padding: 20px 12px; }
+            h1 { font-size: 1.5em; }
+            .message { padding: 16px; }
+            .header { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
 <body>
+    <div class="share-bar">
+        <button class="share-btn" onclick="copyPageUrl()">📋 Copy Link</button>
+    </div>
+    
     <div class="container">
         <header>
-            <h1>Liminal Conversation</h1>
-            <p class="subtitle"></p>
+            <h1>⟨ Liminal Backrooms ⟩</h1>
+            <p class="subtitle">AI Conversation Archive</p>
         </header>
         
         <div id="conversation">"""
@@ -2215,31 +2440,29 @@ class ConversationManager:
                 
                 # Add header for assistant messages
                 if role == "assistant":
-                    display_name = ai_name
+                    html_content += f'\n                <div class="header"><span class="ai-name">{ai_name}</span>'
                     if model:
-                        display_name += f" ({model})"
-                    html_content += f'\n                <div class="header">{display_name} <span class="timestamp">{timestamp}</span></div>'
+                        html_content += f' <span class="model-name">({model})</span>'
+                    html_content += f' <span class="timestamp">{timestamp}</span></div>'
                 elif role == "user":
-                    html_content += f'\n                <div class="header">User <span class="timestamp">{timestamp}</span></div>'
+                    html_content += f'\n                <div class="header"><span class="ai-name">User</span> <span class="timestamp">{timestamp}</span></div>'
                 
                 # Add message content
                 html_content += f'\n                <div class="content">{processed_content}</div>'
                 
-                # Removed HTML contribution artifact block
-                
                 # Close content div
                 html_content += '\n            </div>'
                 
-                # Add image if present
+                # Add image if present - full width
                 if has_image:
                     html_content += f'\n            <div class="message-image">'
                     if image_base64:
                         # Use base64 data directly
-                        html_content += f'\n                <img src="data:image/jpeg;base64,{image_base64}" alt="Uploaded image" />'
+                        html_content += f'\n                <img src="data:image/jpeg;base64,{image_base64}" alt="Generated image" loading="lazy" />'
                     elif image_path:
                         # Convert Windows path format to web format if needed
                         web_path = image_path.replace('\\', '/')
-                        html_content += f'\n                <img src="{web_path}" alt="Generated image" />'
+                        html_content += f'\n                <img src="{web_path}" alt="Generated image" loading="lazy" />'
                     html_content += f'\n            </div>'
                 
                 # Close message div
@@ -2250,9 +2473,32 @@ class ConversationManager:
         </div>
         
         <footer>
-            <p>Generated by Liminal Backrooms</p>
+            <p>Generated by <a href="#">Liminal Backrooms</a></p>
         </footer>
     </div>
+    
+    <script>
+        function copyPageUrl() {
+            const url = window.location.href;
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = document.querySelector('.share-btn');
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000);
+            }).catch(() => {
+                // Fallback for file:// URLs
+                const text = document.documentElement.outerHTML;
+                const blob = new Blob([text], {type: 'text/html'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'conversation.html';
+                a.click();
+                const btn = document.querySelector('.share-btn');
+                btn.textContent = '✓ Downloaded!';
+                setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000);
+            });
+        }
+    </script>
 </body>
 </html>"""
             
