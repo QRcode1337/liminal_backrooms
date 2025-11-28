@@ -1,26 +1,49 @@
 # liminal_backrooms
 
-A Python-based application that enables dynamic conversations between multiple AI models in a graphical user interface. The system supports various AI models including Claude, OpenAI, Gemini, Grok etc, allowing them to interact with each other through text and image generation.
+A Python-based application that enables dynamic conversations between multiple AI models in a graphical user interface. Originally designed for exploring liminal AI interactions, it's evolved into a flexible platform for multi-agent shenanigans.
 
+## What's New
+
+- **Dynamic AI Participants**: Models can invite other AIs into the conversation using `!add_ai` (up to 5 participants)
+- **AI-Generated Images**: Models create their own images using Gemini 3 Pro Image Preview via `!image` command
+- **AI-Generated Videos**: Sora 2 video generation via `!video` command (currently disabled in scenarios - expensive!)
+- **Self-Muting**: Some scenarios include `!mute_self` so AIs can sit out a turn and just listen
+- **New Scenarios**: Fresh scenario prompts written by Claude Opus 4.5, including:
+  - WhatsApp group chat energy
+  - Anthropic Slack #random
+  - Museum of Cursed Objects
+  - Conspiracy Theory chat
+  - Dystopian Ad Agency
+  - And the original Backrooms exploration
+- **Better HTML Export**: Styled dark theme output for sharing conversations
+
+## How It Works
+
+All LLMs run through **OpenRouter**. For Sora video generation, you'll need an **OpenAI API key**.
+
+While great for AI shitposting, this is easy to customize for interesting experiments. Claude Opus 4.5 in Cursor (or similar) can whip up new scenarios in no time.
 
 ## Features
 
 - Multi-model AI conversations with support for:
-  - Claude (Anthropic)
-  - OpenRouter Models:
-    - GPT (OpenAI)
-    - Grok (xAI)
-    - LLaMA (Meta)
-    - Gemini (Google)
-    - Anything on openrouter - if it's not listed add in config.
-  - Google Gemini 3 Pro Image Preview (via OpenRouter) for image generation (toggle in GUI)
-  - OpenAI Sora 2 video generation (selectable as AI-2; videos saved to `videos/`)
+  - Claude (Anthropic) - all versions
+  - GPT (OpenAI)
+  - Grok (xAI)
+  - Gemini (Google)
+  - DeepSeek R1
+  - Kimi K2
+  - Anything on OpenRouter - if it's not listed, add it in config
+
+- AI Agent Commands:
+  - `!add_ai "Model Name" "persona"` - invite another AI to the conversation (max 5)
+  - `!image "description"` - generate an image (Gemini 3 Pro)
+  - `!video "description"` - generate a video (Sora 2) [currently disabled in scenarios]
+  - `!mute_self` - sit out a turn and just listen
 
 - Advanced Features:
-  - Chain of Thought reasoning display optional
+  - Chain of Thought reasoning display (optional)
   - Customizable conversation turns and modes (AI-AI or Human-AI)
-  - Preset system prompt pairs
-  - Image generation and analysis capabilities
+  - Preset scenario prompts for different vibes
   - Export functionality for conversations and generated images
   - Modern dark-themed GUI interface
   - Conversation memory system
@@ -33,34 +56,23 @@ A Python-based application that enables dynamic conversations between multiple A
 
 ## API Keys Required
 
-You'll need API keys from the following services to use all features:
+Create a `.env` file in the project root:
 
-1. Anthropic (Claude):
-   - Sign up at: https://console.anthropic.com/
-   - Endpoint: https://api.anthropic.com/v1/messages
-   - Models: claude-3-opus, claude-3.5-sonnet, claude-3-haiku
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key    # Required - all LLMs route through here
+OPENAI_API_KEY=your_openai_api_key            # Optional - only needed for Sora video generation
+```
 
-2. OpenRouter:
-   - Sign up at: https://openrouter.ai/
-   - Endpoint: https://openrouter.ai/api/v1/chat/completions
-   - Provides access to: GPT-4, Grok, Qwen, LLaMA, Gemini, and more
-
-3. Replicate (for DeepSeek R1; optional):
-   - Sign up at: https://replicate.com/
-   - Used for DeepSeek R1 text generation; Flux image generation optional
-
-4. OpenAI (Sora video):
-   - Requires `OPENAI_API_KEY`
-   - Used for Sora 2/Pro video generation
-   - Optional: `OPENAI_BASE_URL` (defaults to `https://api.openai.com/v1`)
-   - Note: Image generation now uses Google Gemini via OpenRouter (no separate API key needed)
+Get your keys:
+- OpenRouter: https://openrouter.ai/
+- OpenAI (for Sora): https://platform.openai.com/
 
 ## Installation
 
 1. Clone the repository:
 ```bash
 git clone [repository-url]
-cd [repository-name]
+cd liminal_backrooms
 ```
 
 2. Install Poetry if you haven't already:
@@ -73,27 +85,7 @@ curl -sSL https://install.python-poetry.org | python3 -
 poetry install
 ```
 
-4. Create a `.env` file in the project root with your API keys (see Configuration section below)
-
-## Configuration
-
-1. Environment Variables (`.env`):
-   - Create a `.env` file in the project root with your API keys:
-   ```env
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-   OPENROUTER_API_KEY=your_openrouter_api_key
-   OPENAI_API_KEY=your_openai_api_key  # For Sora video generation (optional)
-   ```
-
-2. Application Configuration (`config.py`):
-   - Runtime settings (e.g., turn delay)
-   - Available AI models in `AI_MODELS` dictionary
-   - System prompt pairs in `SYSTEM_PROMPT_PAIRS` dictionary
-   - Add new models or prompt pairs by updating these dictionaries
-
-3. Memory System (optional):
-   - Place JSON files at `memories/ai-1_memories.json` and `memories/ai-2_memories.json`
-   - Contents should be a JSON array of prior messages (simple strings are fine)
+4. Create your `.env` file with API keys (see above)
 
 ## Usage
 
@@ -105,52 +97,62 @@ poetry run python main.py
 2. GUI Controls:
    - Mode Selection: Choose between AI-AI conversation or Human-AI interaction
    - Iterations: Set number of conversation turns (1-100)
-   - AI Model Selection: Choose models for AI-1 and AI-2
-   - Prompt Style: Select from predefined conversation styles
+   - AI Model Selection: Choose models for each AI slot
+   - Prompt Style: Select from predefined scenarios
    - Input Field: Enter your message or initial prompt
    - Export: Save conversation and generated images
+   - View HTML: Open styled conversation in browser
 
-3. Special Features:
-   - Chain of Thought: DeepSeek models show reasoning process
-   - Image Generation: Google Gemini 3 Pro Image Preview creates images from prompts (via OpenRouter)
-   - Export: Saves conversations and images with timestamps
+3. The AIs take it from there - they can add each other, generate images, and go wherever the scenario takes them.
 
-### Using Sora 2 (Video Generation)
+## Configuration
 
-1. In `AI Model Selection`, set `AI-1` to an LLM and `AI-2` to `Sora 2` (or `Sora 2 Pro`).
-2. In `Prompt Style`, choose `Video Collaboration (AI-1 to Sora)`.
-   - `AI_2` prompt is intentionally blank (Sora does not use system prompts).
-3. Start the session. On each AI-2 turn, Sora renders a video from the AI-1 prompt.
-4. Output files are saved under `videos/` with timestamped filenames. The UI will print a line like:
-   - `[Sora] Video created: videos/2025...mp4`
-5. Note: Videos are not parsed back into context (yet); the next turn continues from text only.
+Application settings in `config.py`:
+- Runtime settings (turn delay, etc.)
+- Available AI models in `AI_MODELS` dictionary
+- Scenario prompts in `SYSTEM_PROMPT_PAIRS` dictionary
+
+### Adding New Models
+
+Add entries to `AI_MODELS` in config.py:
+```python
+"Model Display Name": "openrouter/model-id",
+```
+
+### Creating Custom Scenarios
+
+Add entries to `SYSTEM_PROMPT_PAIRS` in config.py. Each scenario needs prompts for AI-1 through AI-5. Check existing scenarios for the format - or just ask an AI to write them for you.
+
+## Sora 2 Video Generation
+
+To enable video generation:
+
+1. Set one AI slot to `Sora 2` or `Sora 2 Pro`
+2. Or add `!video` commands to your scenario prompts
+3. Videos save to `videos/` folder
 
 Environment variables (optional):
 ```env
-SORA_SECONDS=12        # clip duration (e.g., 4, 8, 10, 12)
-SORA_SIZE=1280x720     # resolution hint (e.g., 1280x720)
-OPENAI_BASE_URL=...    # override API base, if needed
+SORA_SECONDS=12        # clip duration (4, 8, 10, 12)
+SORA_SIZE=1280x720     # resolution
 ```
-For the auto-trigger mode (not required when using Sora as AI-2), you can also enable generating a Sora video after AI-1 responses:
-```env
-SORA_AUTO_FROM_AI1=1
-```
-This will run Sora in the background and save videos to `videos/` without using the GUI embedding.
+
+**Note**: Video generation is expensive. The `!video` command has been removed from default scenarios but is easy to add back.
 
 ## Troubleshooting
 
 1. API Issues:
-   - Check API key validity
-   - Verify endpoint URLs in config
-   - Check API rate limits
-   - Monitor API response errors in console
+   - Check API key validity in `.env`
+   - Verify you have credits on OpenRouter
+   - Check console for error messages
 
 2. GUI Issues:
    - Ensure PyQt6 is installed (handled by Poetry install)
    - Check Python version compatibility
-   - Verify display resolution settings
 
-
+3. Empty Responses:
+   - Some models occasionally return empty - the app will retry once automatically
+   - Check OpenRouter status if persistent
 
 ## Contributing
 
@@ -163,8 +165,3 @@ This will run Sora in the background and save videos to `videos/` without using 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-
-
-
-
