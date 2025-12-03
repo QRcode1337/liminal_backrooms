@@ -29,6 +29,8 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
     Supported commands:
         !image "prompt" - Generate an image with the given prompt
         !video "prompt" - Generate a video with the given prompt  
+        !search "query" - Search the web and share results with the group
+        !prompt "text" - Append text to this AI's own system prompt
         !list_models - Query available AI models for invitation
         !add_ai "model" "persona" - Add a new AI participant
         !remove_ai "AI-X" - Remove an AI participant
@@ -44,6 +46,9 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
         # Match "..." (can contain ') or '...' (can contain ")
         'image': r'!image\s+(?:"([^"]+)"|\'([^\']+)\')',
         'video': r'!video\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'search': r'!search\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'prompt': r'!prompt\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'temperature': r'!temperature\s+([\d.]+)',  # Match decimal number like 0.7, 1.5, etc.
         'add_ai': r'!add_ai\s+(?:"([^"]+)"|\'([^\']+)\')(?:\s+(?:"([^"]*)"|\'([^\']*)\'))?',
         'remove_ai': r'!remove_ai\s+(?:"([^"]+)"|\'([^\']+)\')',
         'list_models': r'!list_models\b',
@@ -69,6 +74,15 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
             elif action == 'video':
                 # Groups 0 or 1 (double or single quoted)
                 params = {'prompt': get_first_value(0, 1)}
+            elif action == 'search':
+                # Groups 0 or 1 (double or single quoted)
+                params = {'query': get_first_value(0, 1)}
+            elif action == 'prompt':
+                # Groups 0 or 1 (double or single quoted)
+                params = {'text': get_first_value(0, 1)}
+            elif action == 'temperature':
+                # Single group - the decimal number
+                params = {'value': groups[0] if groups else None}
             elif action == 'add_ai':
                 # Model: groups 0 or 1, Persona: groups 2 or 3
                 params = {
@@ -91,10 +105,12 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
             )
             commands.append(cmd)
             
-            # Remove command from cleaned text
-            cleaned = cleaned.replace(match.group(0), '')
+            # Strip !prompt and !temperature commands from text so other AIs don't see them
+            # (keeps self-modifications private to each AI)
+            if action in ('prompt', 'temperature'):
+                cleaned = cleaned.replace(match.group(0), '')
     
-    # Clean up extra whitespace left behind
+    # Clean up extra whitespace but preserve content
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)  # Collapse multiple newlines
     cleaned = cleaned.strip()
     

@@ -1832,7 +1832,7 @@ class ControlPanel(QWidget):
         iterations_layout.addWidget(iterations_label)
         
         self.iterations_selector = QComboBox()
-        self.iterations_selector.addItems(["1", "2", "4", "6", "12", "100"])
+        self.iterations_selector.addItems(["1", "2", "5", "6", "10", "100"])
         self.iterations_selector.setStyleSheet(self.get_combobox_style())
         iterations_layout.addWidget(self.iterations_selector)
         controls_layout.addWidget(iterations_container)
@@ -1997,6 +1997,11 @@ class ControlPanel(QWidget):
         self.view_html_button.setToolTip("View conversation as shareable HTML")
         self.view_html_button.clicked.connect(lambda: open_html_in_browser("conversation_full.html"))
         action_layout.addWidget(self.view_html_button)
+        
+        # BackroomsBench evaluation button
+        self.backroomsbench_button = self.create_glow_button("🌀 BACKROOMSBENCH (beta)", COLORS['accent_purple'])
+        self.backroomsbench_button.setToolTip("Run multi-judge AI evaluation (depth/philosophy)")
+        action_layout.addWidget(self.backroomsbench_button)
         
         controls_layout.addWidget(action_container)
         
@@ -2602,9 +2607,11 @@ class ConversationPane(QWidget):
     
     def render_conversation(self):
         """Render conversation in the display"""
-        # Check if user is at the bottom before re-rendering
+        # Save scroll position before re-rendering
         scrollbar = self.conversation_display.verticalScrollBar()
-        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 20
+        old_scroll_value = scrollbar.value()
+        old_scroll_max = scrollbar.maximum()
+        was_at_bottom = old_scroll_value >= old_scroll_max - 20
         
         # Clear display
         self.conversation_display.clear()
@@ -2741,11 +2748,23 @@ class ConversationPane(QWidget):
         # Set HTML in display
         self.conversation_display.setHtml(html)
         
-        # Only auto-scroll if user was already at the bottom
+        # Restore scroll position
         if was_at_bottom:
+            # User was at bottom - scroll to new bottom
             self.conversation_display.verticalScrollBar().setValue(
                 self.conversation_display.verticalScrollBar().maximum()
             )
+        else:
+            # User was scrolled up - preserve their position
+            # Scale the old position to the new document size if needed
+            new_max = self.conversation_display.verticalScrollBar().maximum()
+            if old_scroll_max > 0 and new_max > 0:
+                # Preserve absolute position (or closest equivalent)
+                self.conversation_display.verticalScrollBar().setValue(
+                    min(old_scroll_value, new_max)
+                )
+            else:
+                self.conversation_display.verticalScrollBar().setValue(old_scroll_value)
     
     def process_content_with_code_blocks(self, content):
         """Process content to properly format code blocks"""
@@ -2940,10 +2959,7 @@ class ConversationPane(QWidget):
         
     def display_conversation(self, conversation, branch_data=None):
         """Display the conversation in the text edit widget"""
-        # Clear the current text
-        self.conversation_display.clear()
-        
-        # Store conversation data
+        # Store conversation data (don't clear here - render_conversation handles clearing with scroll preservation)
         self.conversation = conversation
         
         # Check if we're in a branch
@@ -3432,6 +3448,9 @@ class LiminalBackroomsApp(QMainWindow):
         # Export button
         self.right_sidebar.control_panel.export_button.clicked.connect(self.export_conversation)
         
+        # BackroomsBench evaluation button
+        self.right_sidebar.control_panel.backroomsbench_button.clicked.connect(self.run_backroomsbench_evaluation)
+        
         # Connect context menu actions to the main app methods
         self.left_pane.set_rabbithole_callback(self.branch_from_selection)
         self.left_pane.set_fork_callback(self.fork_from_selection)
@@ -3478,6 +3497,193 @@ class LiminalBackroomsApp(QMainWindow):
     def export_conversation(self):
         """Export the current conversation"""
         self.left_pane.export_conversation()
+    
+    def run_shitpostbench_evaluation(self):
+        """Run ShitpostBench multi-judge evaluation on current session."""
+        from shitpostbench import run_shitpostbench
+        from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+        from PyQt6.QtCore import Qt, QTimer
+        import threading
+        import subprocess
+        
+        # Get current conversation
+        conversation = getattr(self, 'main_conversation', [])
+        if len(conversation) < 5:
+            QMessageBox.warning(
+                self, 
+                "Not Enough Content",
+                "Need at least 5 messages for a proper evaluation.\nKeep the chaos going! 🦝"
+            )
+            return
+        
+        # Get scenario name
+        scenario = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        
+        # Get participants - collect which AIs are active and their models
+        participants = []
+        selectors = [
+            self.right_sidebar.control_panel.ai1_model_selector,
+            self.right_sidebar.control_panel.ai2_model_selector,
+            self.right_sidebar.control_panel.ai3_model_selector,
+            self.right_sidebar.control_panel.ai4_model_selector,
+            self.right_sidebar.control_panel.ai5_model_selector,
+        ]
+        for i, selector in enumerate(selectors, 1):
+            model = selector.currentText()
+            if model:
+                participants.append(f"AI-{i}: {model}")
+        
+        # Show progress dialog
+        progress = QProgressDialog(
+            "🏆 Running ShitpostBench...\n\nSending to 3 judges (Opus, Gemini, GPT)", 
+            None, 0, 0, self
+        )
+        progress.setWindowTitle("ShitpostBench Evaluation")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        # Store result for callback
+        self._shitpostbench_result = None
+        self._shitpostbench_error = None
+        self._shitpostbench_progress = progress
+        
+        def run_eval():
+            try:
+                self._shitpostbench_result = run_shitpostbench(
+                    conversation=conversation,
+                    scenario_name=scenario,
+                    participant_models=participants
+                )
+            except Exception as e:
+                print(f"[ShitpostBench] Error: {e}")
+                self._shitpostbench_error = str(e)
+        
+        def check_complete():
+            if self._shitpostbench_result is not None:
+                # Success - close progress and show result
+                progress.close()
+                result = self._shitpostbench_result
+                self.statusBar().showMessage(
+                    f"🏆 ShitpostBench complete! {result['summary']['successful_evaluations']}/3 judges filed reports"
+                )
+                # Open the reports folder
+                try:
+                    subprocess.Popen(f'explorer "{result["output_dir"]}"')
+                except Exception:
+                    pass
+                self._shitpostbench_result = None
+                self._check_timer.stop()
+            elif self._shitpostbench_error is not None:
+                # Error
+                progress.close()
+                QMessageBox.critical(
+                    self,
+                    "ShitpostBench Error",
+                    f"Evaluation failed:\n{self._shitpostbench_error}"
+                )
+                self._shitpostbench_error = None
+                self._check_timer.stop()
+        
+        # Start background thread
+        threading.Thread(target=run_eval, daemon=True).start()
+        
+        # Poll for completion
+        self._check_timer = QTimer()
+        self._check_timer.timeout.connect(check_complete)
+        self._check_timer.start(500)  # Check every 500ms
+    
+    def run_backroomsbench_evaluation(self):
+        """Run BackroomsBench multi-judge evaluation on current session."""
+        from backroomsbench import run_backroomsbench
+        from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+        from PyQt6.QtCore import Qt, QTimer
+        import threading
+        import subprocess
+        
+        # Get current conversation
+        conversation = getattr(self, 'main_conversation', [])
+        if len(conversation) < 5:
+            QMessageBox.warning(
+                self, 
+                "Not Enough Content",
+                "Need at least 5 messages for a proper evaluation.\nLet the dialogue deepen. 🌀"
+            )
+            return
+        
+        # Get scenario name
+        scenario = self.right_sidebar.control_panel.prompt_pair_selector.currentText()
+        
+        # Get participants
+        participants = []
+        selectors = [
+            self.right_sidebar.control_panel.ai1_model_selector,
+            self.right_sidebar.control_panel.ai2_model_selector,
+            self.right_sidebar.control_panel.ai3_model_selector,
+            self.right_sidebar.control_panel.ai4_model_selector,
+            self.right_sidebar.control_panel.ai5_model_selector,
+        ]
+        for i, selector in enumerate(selectors, 1):
+            model = selector.currentText()
+            if model:
+                participants.append(f"AI-{i}: {model}")
+        
+        # Show progress dialog
+        progress = QProgressDialog(
+            "🌀 Running BackroomsBench...\n\nSending to 3 judges (Opus, Gemini, GPT)", 
+            None, 0, 0, self
+        )
+        progress.setWindowTitle("BackroomsBench Evaluation")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        
+        # Store result for callback
+        self._backroomsbench_result = None
+        self._backroomsbench_error = None
+        self._backroomsbench_progress = progress
+        
+        def run_eval():
+            try:
+                self._backroomsbench_result = run_backroomsbench(
+                    conversation=conversation,
+                    scenario_name=scenario,
+                    participant_models=participants
+                )
+            except Exception as e:
+                print(f"[BackroomsBench] Error: {e}")
+                self._backroomsbench_error = str(e)
+        
+        def check_complete():
+            if self._backroomsbench_result is not None:
+                progress.close()
+                result = self._backroomsbench_result
+                self.statusBar().showMessage(
+                    f"🌀 BackroomsBench complete! {result['summary']['successful_evaluations']}/3 judges filed reports"
+                )
+                try:
+                    subprocess.Popen(f'explorer "{result["output_dir"]}"')
+                except Exception:
+                    pass
+                self._backroomsbench_result = None
+                self._backrooms_check_timer.stop()
+            elif self._backroomsbench_error is not None:
+                progress.close()
+                QMessageBox.critical(
+                    self,
+                    "BackroomsBench Error",
+                    f"Evaluation failed:\n{self._backroomsbench_error}"
+                )
+                self._backroomsbench_error = None
+                self._backrooms_check_timer.stop()
+        
+        # Start background thread
+        threading.Thread(target=run_eval, daemon=True).start()
+        
+        # Poll for completion
+        self._backrooms_check_timer = QTimer()
+        self._backrooms_check_timer.timeout.connect(check_complete)
+        self._backrooms_check_timer.start(500)
     
     def on_node_hover(self, node_id):
         """Handle node hover in the network view"""

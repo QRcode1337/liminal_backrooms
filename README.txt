@@ -14,7 +14,11 @@ A Python-based application that enables dynamic conversations between multiple A
   - Museum of Cursed Objects
   - Conspiracy Theory chat
   - Dystopian Ad Agency
+  - Dark fantasy D&D campaigns
   - And the original Backrooms exploration
+- **AI Self-Modification**: Models can modify their own system prompts (`!prompt`) and adjust their temperature (`!temperature`) for dynamic behavior
+- **Web Search**: Models can search the internet for up-to-date information (`!search`)
+- **BackroomsBench Evaluation (Beta)**: Multi-judge LLM evaluation system for measuring philosophical depth and linguistic creativity
 - **Better HTML Export**: Styled dark theme output for sharing conversations
 
 ## How It Works
@@ -38,6 +42,9 @@ While great for AI shitposting, this is easy to customize for interesting experi
   - `!add_ai "Model Name" "persona"` - invite another AI to the conversation (max 5)
   - `!image "description"` - generate an image (Gemini 3 Pro)
   - `!video "description"` - generate a video (Sora 2) [currently disabled in scenarios]
+  - `!search "query"` - search the web for up-to-date information (available in some scenarios)
+  - `!prompt "text"` - modify your own system prompt (persists across turns)
+  - `!temperature X` - adjust your own sampling temperature (0-2, default 1.0)
   - `!mute_self` - sit out a turn and just listen
 
 - Advanced Features:
@@ -47,6 +54,9 @@ While great for AI shitposting, this is easy to customize for interesting experi
   - Export functionality for conversations and generated images
   - Modern dark-themed GUI interface
   - Conversation memory system
+  - AI self-modification (system prompt and temperature control)
+  - Web search integration for real-time information
+  - BackroomsBench evaluation system (beta) with multi-judge LLM scoring
 
 ## Prerequisites
 
@@ -102,6 +112,7 @@ poetry run python main.py
    - Input Field: Enter your message or initial prompt
    - Export: Save conversation and generated images
    - View HTML: Open styled conversation in browser
+   - BackroomsBench (beta): Run multi-judge evaluation on conversations
 
 3. The AIs take it from there - they can add each other, generate images, and go wherever the scenario takes them.
 

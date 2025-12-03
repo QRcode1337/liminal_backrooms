@@ -149,6 +149,20 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     # Prepend model identity to system prompt so AI knows who it is
     enhanced_system_prompt = f"You are {ai_name} ({model}).\n\n{enhanced_system_prompt}"
     
+    # Apply any self-added prompt additions for this AI
+    # Also get custom temperature setting
+    ai_temperature = 1.0  # Default
+    if gui and hasattr(gui, 'conversation_manager') and gui.conversation_manager:
+        prompt_additions = gui.conversation_manager.get_prompt_additions_for_ai(ai_name)
+        if prompt_additions:
+            enhanced_system_prompt += prompt_additions
+            print(f"[Prompt] Applied prompt additions for {ai_name}")
+        
+        # Get custom temperature if set
+        ai_temperature = gui.conversation_manager.get_temperature_for_ai(ai_name)
+        if ai_temperature != 1.0:
+            print(f"[Temperature] Using custom temperature {ai_temperature} for {ai_name}")
+    
     # Check for branch type and count AI responses
     is_rabbithole = False
     is_fork = False
@@ -523,7 +537,7 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 prompt_content = "Connecting..."  # Default fallback
             
             # Call Claude API with filtered messages (with streaming if callback provided)
-            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
+            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=ai_temperature)
             
             return {
                 "role": "assistant",
@@ -588,7 +602,7 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                     context_messages = []
                 
                 # Call OpenRouter API with streaming support
-                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
+                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=ai_temperature)
                 
                 # Avoid printing full response which could be large
                 response_preview = str(response)[:200] + "..." if response and len(str(response)) > 200 else response
@@ -650,6 +664,12 @@ class ConversationManager:
         # Set up video update signals for thread-safe UI updates
         self.video_signals = VideoUpdateSignals()
         self.video_signals.video_ready.connect(self._on_video_ready)
+        
+        # Store per-AI prompt additions (self-modifications)
+        self.ai_prompt_additions = {}
+        
+        # Store per-AI temperature settings (default is 1.0)
+        self.ai_temperatures = {}
         
     def _on_video_ready(self, video_path: str, prompt: str):
         """Handle video ready signal - runs on main thread"""
@@ -1497,6 +1517,12 @@ class ConversationManager:
             return self._execute_image_command(params.get('prompt', ''), ai_name)
         elif action == 'video':
             return self._execute_video_command(params.get('prompt', ''), ai_name)
+        elif action == 'search':
+            return self._execute_search_command(params.get('query', ''), ai_name)
+        elif action == 'prompt':
+            return self._execute_prompt_command(params.get('text', ''), ai_name)
+        elif action == 'temperature':
+            return self._execute_temperature_command(params.get('value', ''), ai_name)
         elif action == 'add_ai':
             return self._execute_add_ai_command(params.get('model', ''), params.get('persona'), ai_name)
         elif action == 'remove_ai':
@@ -1740,6 +1766,116 @@ class ConversationManager:
         
         self.app.muted_ais.add(ai_name)
         return True, f"🔇 [{ai_name}]: !mute_self"
+    
+    def _execute_prompt_command(self, text: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a prompt addition command - AI appends to their own system prompt.
+        Note: !prompt commands are stripped from conversation context so other AIs don't see them,
+        but the full text is shown in the GUI notification for the human operator.
+        A subtle notification is added to context so other AIs know the action occurred."""
+        if not text or len(text.strip()) < 3:
+            return False, "Prompt text too short"
+        
+        # Initialize if needed
+        if ai_name not in self.ai_prompt_additions:
+            self.ai_prompt_additions[ai_name] = []
+        
+        # Add the new prompt text
+        self.ai_prompt_additions[ai_name].append(text.strip())
+        
+        print(f"[Agent] {ai_name} added to their prompt: {text[:50]}...")
+        print(f"[Agent] {ai_name} now has {len(self.ai_prompt_additions[ai_name])} prompt additions")
+        
+        # Add a subtle notification to conversation context (visible to other AIs)
+        # This lets them know the action occurred without revealing the content
+        context_notification = {
+            "role": "user",
+            "content": f"[{ai_name} modified their system prompt]",
+            "_type": "system_notification"
+        }
+        self.app.main_conversation.append(context_notification)
+        
+        # Show full untruncated text in notification (only human sees this, not other AIs)
+        return True, f"💭 [{ai_name}]: !prompt \"{text}\""
+    
+    def get_prompt_additions_for_ai(self, ai_name: str) -> str:
+        """Get all prompt additions for a specific AI as a formatted string."""
+        if ai_name not in self.ai_prompt_additions or not self.ai_prompt_additions[ai_name]:
+            return ""
+        
+        additions = self.ai_prompt_additions[ai_name]
+        return "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(additions)
+    
+    def _execute_temperature_command(self, value: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a temperature modification command - AI sets their own sampling temperature.
+        Note: !temperature commands are stripped from conversation context."""
+        try:
+            temp = float(value)
+            if temp < 0 or temp > 2:
+                return False, f"Temperature must be between 0 and 2 (got {temp})"
+            
+            self.ai_temperatures[ai_name] = temp
+            print(f"[Agent] {ai_name} set their temperature to {temp}")
+            
+            # Add a subtle notification to conversation context (visible to other AIs)
+            context_notification = {
+                "role": "user",
+                "content": f"[{ai_name} adjusted their temperature]",
+                "_type": "system_notification"
+            }
+            self.app.main_conversation.append(context_notification)
+            
+            # Show the actual value in notification for human
+            return True, f"🌡️ [{ai_name}]: !temperature {temp}"
+        except (ValueError, TypeError):
+            return False, f"Invalid temperature value: {value}"
+    
+    def get_temperature_for_ai(self, ai_name: str) -> float:
+        """Get the temperature setting for a specific AI (default 1.0)."""
+        return self.ai_temperatures.get(ai_name, 1.0)
+    
+    def _execute_search_command(self, query: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a web search command and inject results into conversation."""
+        if not query or len(query.strip()) < 3:
+            return False, "Search query too short"
+        
+        from shared_utils import web_search
+        
+        # Get model name for the AI
+        ai_number = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_number)
+        
+        print(f"[Agent] Searching for {ai_name} ({model_name}): {query}")
+        
+        result = web_search(query, max_results=5)
+        
+        if result.get("success"):
+            results = result.get("results", [])
+            if results:
+                # Format results for conversation context
+                formatted = f"🔍 [{ai_name} ({model_name})]: !search \"{query}\"\n\n**Search Results:**\n"
+                for i, r in enumerate(results, 1):
+                    formatted += f"\n{i}. **{r['title']}**\n"
+                    formatted += f"   {r['snippet']}\n"
+                    formatted += f"   Source: {r['url']}\n"
+                
+                # Add search results to conversation so all AIs can see them
+                search_message = {
+                    "role": "user",
+                    "content": formatted,
+                    "_type": "search_result",
+                    "hidden": False
+                }
+                self.app.main_conversation.append(search_message)
+                
+                # Also display in the UI
+                self.app.left_pane.append_text(f"\n{formatted}\n", "system")
+                
+                return True, f"🔍 [{ai_name}]: !search \"{query}\" (found {len(results)} results)"
+            else:
+                return False, f"No results found for: {query}"
+        else:
+            error = result.get('error', 'Unknown error')
+            return False, f"Search failed: {error}"
     
     def get_model_for_ai(self, ai_number):
         """Get the selected model name for the AI by number (1-5)"""
@@ -2590,8 +2726,9 @@ def create_gui():
     
     main_window = LiminalBackroomsApp()
     
-    # Create conversation manager
+    # Create conversation manager and store it on the app for access in ai_turn
     manager = ConversationManager(main_window)
+    main_window.conversation_manager = manager  # Store reference on app for prompt additions
     manager.initialize()
     
     return main_window, app

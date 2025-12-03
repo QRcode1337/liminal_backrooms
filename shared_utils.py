@@ -20,6 +20,12 @@ try:
 except ImportError:
     print("BeautifulSoup not found. Please install it with 'pip install beautifulsoup4'")
 
+try:
+    from ddgs import DDGS
+except ImportError:
+    DDGS = None
+    print("ddgs not found. Install with: pip install ddgs")
+
 # Load environment variables
 load_dotenv()
 
@@ -29,11 +35,12 @@ anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callback=None):
+def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callback=None, temperature=1.0):
     """Call the Claude API with the given messages and prompt
     
     Args:
         stream_callback: Optional function(chunk: str) to call with each streaming token
+        temperature: Sampling temperature (0-2, default 1.0)
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -45,7 +52,7 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callb
     payload = {
         "model": model_id,
         "max_tokens": 4000,
-        "temperature": 1,
+        "temperature": temperature,
         "stream": stream_callback is not None  # Enable streaming if callback provided
     }
     
@@ -53,6 +60,8 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callb
     if system_prompt:
         payload["system"] = system_prompt
         print(f"CLAUDE API USING SYSTEM PROMPT: {system_prompt}")
+    
+    print(f"CLAUDE API USING TEMPERATURE: {temperature}")
     
     # Clean messages to remove duplicates
     filtered_messages = []
@@ -226,11 +235,12 @@ def call_openai_api(prompt, conversation_history, model, system_prompt):
         print(f"Error calling OpenAI API: {e}")
         return None
 
-def call_openrouter_api(prompt, conversation_history, model, system_prompt, stream_callback=None):
+def call_openrouter_api(prompt, conversation_history, model, system_prompt, stream_callback=None, temperature=1.0):
     """Call the OpenRouter API to access various LLM models.
     
     Args:
         stream_callback: Optional function(chunk: str) to call with each streaming token
+        temperature: Sampling temperature (0-2, default 1.0)
     """
     try:
         headers = {
@@ -295,37 +305,74 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
             
             return converted
         
-        def build_messages(include_images=True):
-            """Build the messages list, optionally stripping images."""
+        def build_messages(include_images=True, max_images=5):
+            """Build the messages list, optionally stripping images.
+            
+            Args:
+                include_images: If False, strip ALL images
+                max_images: Maximum number of images to include (from most recent). 
+                           Older images are stripped but text is preserved.
+            """
             msgs = []
             if system_prompt:
                 msgs.append({"role": "system", "content": system_prompt})
             
-            for msg in conversation_history:
-                if msg["role"] != "system":  # Skip system prompts
-                    msgs.append({
-                        "role": msg["role"],
-                        "content": convert_to_openai_format(msg["content"], include_images)
-                    })
+            if include_images and max_images > 0:
+                # First pass: identify which messages have images (by index)
+                image_message_indices = []
+                for i, msg in enumerate(conversation_history):
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        has_image = any(
+                            part.get('type') in ('image', 'image_url') 
+                            for part in content if isinstance(part, dict)
+                        )
+                        if has_image:
+                            image_message_indices.append(i)
+                
+                # Determine which indices should keep their images (last N)
+                indices_to_keep_images = set(image_message_indices[-max_images:]) if image_message_indices else set()
+                
+                if len(image_message_indices) > max_images:
+                    stripped_count = len(image_message_indices) - max_images
+                    print(f"[Context] Stripping {stripped_count} older images, keeping last {max_images}")
+                
+                # Build messages with selective image inclusion
+                for i, msg in enumerate(conversation_history):
+                    if msg["role"] != "system":
+                        keep_images = i in indices_to_keep_images
+                        msgs.append({
+                            "role": msg["role"],
+                            "content": convert_to_openai_format(msg["content"], include_images=keep_images)
+                        })
+            else:
+                # No images mode - strip all
+                for msg in conversation_history:
+                    if msg["role"] != "system":
+                        msgs.append({
+                            "role": msg["role"],
+                            "content": convert_to_openai_format(msg["content"], include_images=False)
+                        })
             
-            # Also convert the prompt if it's structured content
+            # Also convert the prompt if it's structured content (always include images in current prompt)
             msgs.append({"role": "user", "content": convert_to_openai_format(prompt, include_images)})
             return msgs
         
-        def make_api_call(include_images=True):
+        def make_api_call(include_images=True, max_images=5):
             """Make the API call, returns (success, result_or_error)"""
-            msgs = build_messages(include_images=include_images)
+            msgs = build_messages(include_images=include_images, max_images=max_images)
             
             payload = {
                 "model": openrouter_model,
                 "messages": msgs,
-                "temperature": 1,
+                "temperature": temperature,  # Use AI's custom temperature
                 "max_tokens": 4000,
                 "stream": stream_callback is not None
             }
             
             print(f"\nSending to OpenRouter:")
             print(f"Model: {model}")
+            print(f"Temperature: {temperature}")
             print(f"Include images: {include_images}")
             # Log message summary (avoid huge base64 dumps)
             for i, m in enumerate(msgs):
@@ -1103,4 +1150,80 @@ def generate_video_with_sora(
     except Exception as e:
         logging.exception("Sora video generation error")
         return {"success": False, "error": str(e)}
+
+# -------------------- Web Search Utilities --------------------
+def web_search(query: str, max_results: int = 5) -> dict:
+    """
+    Search the web using DuckDuckGo.
+    
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return
+        
+    Returns:
+        dict with keys: success, results (list of {title, url, snippet}), error
+    """
+    if DDGS is None:
+        return {
+            "success": False,
+            "error": "ddgs package not installed. Run: pip install ddgs"
+        }
+    
+    try:
+        print(f"[WebSearch] Searching for: {query}")
+        
+        # Use the new ddgs API - prioritize news for current events queries
+        ddgs = DDGS()
+        formatted_results = []
+        
+        # For queries about current events, use news search first
+        is_news_query = any(term in query.lower() for term in ["news", "today", "latest", "2025", "drama", "announcement", "release"])
+        
+        if is_news_query:
+            print(f"[WebSearch] Detected news query, searching news first...")
+            try:
+                news_results = list(ddgs.news(query, region="wt-wt", safesearch="off", max_results=max_results))
+                for r in news_results:
+                    formatted_results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", r.get("link", "")),
+                        "snippet": r.get("body", r.get("excerpt", ""))
+                    })
+                print(f"[WebSearch] Found {len(formatted_results)} news results")
+            except Exception as e:
+                print(f"[WebSearch] News search failed: {e}")
+        
+        # If we don't have enough results, try text search
+        if len(formatted_results) < max_results:
+            remaining = max_results - len(formatted_results)
+            try:
+                text_results = list(ddgs.text(
+                    query, 
+                    region="us-en",  # Force US English results
+                    safesearch="off",
+                    max_results=remaining
+                ))
+                for r in text_results:
+                    formatted_results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("href", r.get("link", "")),
+                        "snippet": r.get("body", r.get("snippet", ""))
+                    })
+                print(f"[WebSearch] Added {len(text_results)} text results, total: {len(formatted_results)}")
+            except Exception as e:
+                print(f"[WebSearch] Text search failed: {e}")
+        
+        return {
+            "success": True,
+            "results": formatted_results,
+            "query": query
+        }
+    except Exception as e:
+        print(f"[WebSearch] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
 

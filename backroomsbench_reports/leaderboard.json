@@ -1,0 +1,191 @@
+{
+  "elo_ratings": {
+    "Claude Opus 4.5": 1531.5,
+    "DeepSeek R1": 1562.8,
+    "Claude 3 Opus": 1436.6,
+    "Gemini 3 Pro": 1594.7,
+    "GPT-5 Preview": 1468.4,
+    "GPT 5.1": 1562.5,
+    "Grok 4": 1374.9,
+    "Kimi K2": 1468.7
+  },
+  "sessions": [
+    {
+      "timestamp": "20251201_202613",
+      "scenario": "Backrooms Classic (Agentic)",
+      "scores": {
+        "Claude Opus 4.5": 90,
+        "DeepSeek R1": 94,
+        "Claude 3 Opus": 87,
+        "Gemini 3 Pro": 89,
+        "GPT-5 Preview": 88
+      },
+      "participants": [
+        "Claude Opus 4.5",
+        "DeepSeek R1",
+        "Claude 3 Opus",
+        "Gemini 3 Pro",
+        "GPT-5 Preview"
+      ]
+    },
+    {
+      "timestamp": "20251201_214901",
+      "scenario": "Backrooms Classic (Agentic)",
+      "scores": {
+        "Gemini 3 Pro": 90,
+        "GPT 5.1": 94,
+        "Claude Opus 4.5": 88,
+        "DeepSeek R1": 86,
+        "Grok 4": 79
+      },
+      "participants": [
+        "Gemini 3 Pro",
+        "GPT 5.1",
+        "Claude Opus 4.5",
+        "DeepSeek R1",
+        "Grok 4"
+      ]
+    },
+    {
+      "timestamp": "20251203_130218",
+      "scenario": "Backrooms Classic (Agentic)",
+      "scores": {
+        "Claude Opus 4.5": 91.7,
+        "Gemini 3 Pro": 93.7,
+        "DeepSeek R1": 92.3,
+        "Grok 4": 86.0,
+        "Kimi K2": 87.3
+      },
+      "participants": [
+        "Claude Opus 4.5",
+        "Gemini 3 Pro",
+        "DeepSeek R1",
+        "Grok 4",
+        "Kimi K2"
+      ]
+    }
+  ],
+  "model_history": {
+    "Claude Opus 4.5": [
+      {
+        "timestamp": "20251201_202613",
+        "score": 90,
+        "elo_before": 1500,
+        "elo_after": 1531.9,
+        "elo_change": 31.9
+      },
+      {
+        "timestamp": "20251201_214901",
+        "score": 88,
+        "elo_before": 1531.9,
+        "elo_after": 1531.8,
+        "elo_change": -0.1
+      },
+      {
+        "timestamp": "20251203_130218",
+        "score": 91.7,
+        "elo_before": 1531.8,
+        "elo_after": 1531.5,
+        "elo_change": -0.3
+      }
+    ],
+    "DeepSeek R1": [
+      {
+        "timestamp": "20251201_202613",
+        "score": 94,
+        "elo_before": 1500,
+        "elo_after": 1563.0,
+        "elo_change": 63.0
+      },
+      {
+        "timestamp": "20251201_214901",
+        "score": 86,
+        "elo_before": 1563.0,
+        "elo_after": 1531.3,
+        "elo_change": -31.7
+      },
+      {
+        "timestamp": "20251203_130218",
+        "score": 92.3,
+        "elo_before": 1531.3,
+        "elo_after": 1562.8,
+        "elo_change": 31.5
+      }
+    ],
+    "Claude 3 Opus": [
+      {
+        "timestamp": "20251201_202613",
+        "score": 87,
+        "elo_before": 1500,
+        "elo_after": 1436.6,
+        "elo_change": -63.4
+      }
+    ],
+    "Gemini 3 Pro": [
+      {
+        "timestamp": "20251201_202613",
+        "score": 89,
+        "elo_before": 1500,
+        "elo_after": 1500.1,
+        "elo_change": 0.1
+      },
+      {
+        "timestamp": "20251201_214901",
+        "score": 90,
+        "elo_before": 1500.1,
+        "elo_after": 1531.5,
+        "elo_change": 31.4
+      },
+      {
+        "timestamp": "20251203_130218",
+        "score": 93.7,
+        "elo_before": 1531.5,
+        "elo_after": 1594.7,
+        "elo_change": 63.2
+      }
+    ],
+    "GPT-5 Preview": [
+      {
+        "timestamp": "20251201_202613",
+        "score": 88,
+        "elo_before": 1500,
+        "elo_after": 1468.4,
+        "elo_change": -31.6
+      }
+    ],
+    "GPT 5.1": [
+      {
+        "timestamp": "20251201_214901",
+        "score": 94,
+        "elo_before": 1500,
+        "elo_after": 1562.5,
+        "elo_change": 62.5
+      }
+    ],
+    "Grok 4": [
+      {
+        "timestamp": "20251201_214901",
+        "score": 79,
+        "elo_before": 1500,
+        "elo_after": 1437.9,
+        "elo_change": -62.1
+      },
+      {
+        "timestamp": "20251203_130218",
+        "score": 86.0,
+        "elo_before": 1437.9,
+        "elo_after": 1374.9,
+        "elo_change": -63.0
+      }
+    ],
+    "Kimi K2": [
+      {
+        "timestamp": "20251203_130218",
+        "score": 87.3,
+        "elo_before": 1500,
+        "elo_after": 1468.7,
+        "elo_change": -31.3
+      }
+    ]
+  }
+}

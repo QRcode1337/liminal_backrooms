@@ -172,3 +172,9 @@ memory/ai-2/*
 logs/*
 !logs/.gitkeep
 videos/*
+shitpostbench_evaluation.md
+shitpostbench.py
+reduce_html_size.py
+
+# Benchmark reports (local only)
+shitpostbench_reports/
