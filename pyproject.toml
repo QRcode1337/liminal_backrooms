@@ -1,27 +1,29 @@
 [tool.poetry]
-name = "debate"
-version = "0.1.0"
-description = "AI-to-AI debate system"
+name = "liminal-backrooms"
+version = "0.8.0"
+description = "AI-to-AI conversation system with branching capabilities"
 authors = ["Your Name <you@example.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.10.0,<3.12"
 requests = "^2.32.3"
-replicate = "^1.0.2"
+replicate = "^1.0.7"
 python-dotenv = "^1.0.0"
 Pillow = "^10.2.0"
+PyQt6 = "^6.6.1"
+networkx = "^3.2.1"
+anthropic = "^0.18.1"
+openai = "^1.12.0"
+beautifulsoup4 = "^4.12.3"
 
 [tool.pyright]
-# https://github.com/microsoft/pyright/blob/main/docs/configuration.md
 useLibraryCodeForTypes = true
 exclude = [".cache"]
 
 [tool.ruff]
-# https://beta.ruff.rs/docs/configuration/
 select = ['E', 'W', 'F', 'I', 'B', 'C4', 'ARG', 'SIM']
 ignore = ['W291', 'W292', 'W293']
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
-
