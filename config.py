@@ -30,6 +30,26 @@ OUTPUTS_DIR = "outputs"
 # Structure: Tier → Provider → {Display Name: model_id}
 # This is the curated list - will be validated against OpenRouter API if available
 _CURATED_MODELS = {
+    "SOTA": {
+        "Anthropic": {
+            "Claude Opus 4.5": "anthropic/claude-opus-4.5",
+            "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
+            "Claude 3 Opus": "anthropic/claude-3-opus",
+        },
+        "DeepSeek": {
+            "DeepSeek R1": "deepseek/deepseek-r1-0528",
+        },
+        "Google": {
+            "Gemini 3 Pro": "google/gemini-3-pro-preview",
+            "Gemini 3 Flash": "google/gemini-3-flash-preview",
+        },
+        "OpenAI": {
+            "GPT 5.2": "openai/gpt-5.2",
+        },
+        "xAI": {
+            "Grok 4.1": "x-ai/grok-4.1-fast",
+        },
+    },
     "Paid": {
         "Anthropic Claude": {
             "Claude Opus 4.5": "anthropic/claude-opus-4.5",
