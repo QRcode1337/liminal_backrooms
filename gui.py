@@ -2796,12 +2796,13 @@ class ControlPanel(QWidget):
         btn_group_layout.setSpacing(0)
         
         # Create toggle buttons
+        self.invite_sota_btn = QPushButton("SOTA")
         self.invite_free_btn = QPushButton("Free")
         self.invite_paid_btn = QPushButton("Paid")
         self.invite_both_btn = QPushButton("All")
-        
+
         # Store the buttons for easy access
-        self._invite_tier_buttons = [self.invite_free_btn, self.invite_paid_btn, self.invite_both_btn]
+        self._invite_tier_buttons = [self.invite_sota_btn, self.invite_free_btn, self.invite_paid_btn, self.invite_both_btn]
         
         # Style for toggle buttons
         toggle_btn_style = f"""
@@ -2831,17 +2832,18 @@ class ControlPanel(QWidget):
             btn_group_layout.addWidget(btn)
         
         # Round corners on first and last buttons
-        self.invite_free_btn.setStyleSheet(toggle_btn_style + """
+        self.invite_sota_btn.setStyleSheet(toggle_btn_style + """
             QPushButton { border-radius: 3px 0px 0px 3px; }
         """)
         self.invite_both_btn.setStyleSheet(toggle_btn_style + """
             QPushButton { border-radius: 0px 3px 3px 0px; }
         """)
-        
-        # Set default selection (Free)
-        self.invite_free_btn.setChecked(True)
-        
+
+        # Set default selection (SOTA)
+        self.invite_sota_btn.setChecked(True)
+
         # Tooltips
+        self.invite_sota_btn.setToolTip("AIs can only invite SOTA models")
         self.invite_free_btn.setToolTip("AIs can only invite free models")
         self.invite_paid_btn.setToolTip("AIs can only invite paid models")
         self.invite_both_btn.setToolTip("AIs can invite any model")
@@ -3056,7 +3058,9 @@ class ControlPanel(QWidget):
     
     def get_ai_invite_tier(self):
         """Get the current AI invite tier setting"""
-        if self.invite_free_btn.isChecked():
+        if self.invite_sota_btn.isChecked():
+            return "SOTA"
+        elif self.invite_free_btn.isChecked():
             return "Free"
         elif self.invite_paid_btn.isChecked():
             return "Paid"

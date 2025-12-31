@@ -43,11 +43,14 @@ _CURATED_MODELS = {
             "Gemini 3 Pro": "google/gemini-3-pro-preview",
             "Gemini 3 Flash": "google/gemini-3-flash-preview",
         },
+        "Moonshot AI": {
+            "Kimi K2 Thinking": "moonshotai/kimi-k2-thinking",
+        },
         "OpenAI": {
             "GPT 5.2": "openai/gpt-5.2",
         },
         "xAI": {
-            "Grok 4.1": "x-ai/grok-4.1-fast",
+            "Grok 4": "x-ai/grok-4",
         },
     },
     "Paid": {
@@ -1157,7 +1160,7 @@ creative code:
 }
 
 def get_model_tier_by_id(model_id):
-    """Get the tier (Paid/Free) for a model by its model_id.
+    """Get the tier (SOTA/Paid/Free) for a model by its model_id.
 
     Note: Upstream config has flat AI_MODELS dict. This is a compatibility
     function for our hierarchical model structure in grouped_model_selector.py.
@@ -1165,6 +1168,11 @@ def get_model_tier_by_id(model_id):
     # Check for :free suffix
     if model_id and ":free" in model_id.lower():
         return "Free"
+    # Check if model is in SOTA tier
+    sota_models = AI_MODELS.get("SOTA", {})
+    for provider_models in sota_models.values():
+        if model_id in provider_models.values():
+            return "SOTA"
     # Default to Paid for all other models
     return "Paid"
 
@@ -1197,12 +1205,18 @@ def get_invite_models_text(tier="Both"):
     """Get formatted text listing available models for AI invitations.
 
     Args:
-        tier: "Free", "Paid", or "Both" - controls which models are listed
+        tier: "SOTA", "Free", "Paid", or "Both" - controls which models are listed
 
     Returns:
         Formatted string with model list for inclusion in system prompts
     """
-    if tier == "Free":
+    if tier == "SOTA":
+        # Get SOTA models from the hierarchical structure
+        sota_models = AI_MODELS.get("SOTA", {})
+        models = {}
+        for provider_models in sota_models.values():
+            models.update(provider_models)
+    elif tier == "Free":
         # Filter for free models (those with :free in model_id)
         models = {name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" in mid.lower()}
     elif tier == "Paid":
