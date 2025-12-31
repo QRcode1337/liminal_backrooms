@@ -2426,7 +2426,7 @@ class ConversationManager:
         # Add a subtle notification to conversation context (visible to other AIs)
         # This lets them know the action occurred without revealing the content
         context_notification = {
-            "role": "user",
+            "role": "system",
             "content": f"[{ai_name} modified their system prompt]",
             "_type": "system_notification"
         }
@@ -2460,7 +2460,7 @@ class ConversationManager:
 
         # Add a subtle notification to conversation context (visible to other AIs)
         context_notification = {
-            "role": "user",
+            "role": "system",
             "content": f"[{ai_name} adjusted their temperature]",
             "_type": "system_notification"
         }
