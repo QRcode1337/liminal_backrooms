@@ -14,7 +14,8 @@ import sys
 import re
 from dotenv import load_dotenv
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QThread, pyqtSignal, QObject, QRunnable, pyqtSlot, QThreadPool
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, QRunnable, pyqtSlot, QThreadPool, QTimer
+from datetime import datetime
 import requests
 
 # Load environment variables from .env file
@@ -371,7 +372,19 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                 
         if not is_duplicate:
             filtered_conversation.append(msg)
-    
+
+    # Filter whisper messages - only include whispers addressed to this AI
+    whisper_filtered = []
+    for msg in filtered_conversation:
+        if msg.get('_type') == 'whisper':
+            # Only include whispers addressed to this AI
+            if msg.get('_whisper_to', '').upper() == ai_name.upper():
+                whisper_filtered.append(msg)
+            # Skip whispers for other AIs
+        else:
+            whisper_filtered.append(msg)
+    filtered_conversation = whisper_filtered
+
     # Process filtered conversation
     for i, msg in enumerate(filtered_conversation):
         # Check if this message is from the current AI
@@ -764,7 +777,122 @@ class ConversationManager:
         self.video_signals = VideoUpdateSignals()
         self.video_signals.video_ready.connect(self._on_video_ready)
         self.video_signals.video_failed.connect(self._on_video_failed)
-        
+
+        # Auto-save timer - save every 30 seconds
+        self._autosave_timer = QTimer()
+        self._autosave_timer.timeout.connect(self._auto_save_conversation)
+        self._autosave_timer.start(30000)  # 30 seconds
+        from config import OUTPUTS_DIR
+        self._autosave_path = os.path.join(OUTPUTS_DIR, '.autosave_conversation.json')
+
+    def _auto_save_conversation(self):
+        """Periodically auto-save conversation state for crash recovery."""
+        try:
+            if not hasattr(self.app, 'main_conversation') or not self.app.main_conversation:
+                return
+
+            # Only save if there's meaningful content (at least 2 messages)
+            if len(self.app.main_conversation) < 2:
+                return
+
+            # Build saveable data (strip non-serializable content)
+            save_data = {
+                'timestamp': datetime.now().isoformat(),
+                'conversation': []
+            }
+
+            for msg in self.app.main_conversation:
+                save_msg = {
+                    'role': msg.get('role', ''),
+                    'ai_name': msg.get('ai_name', ''),
+                    'model': msg.get('model', ''),
+                    '_type': msg.get('_type', ''),
+                }
+
+                # Handle content - skip binary image data
+                content = msg.get('content', '')
+                if isinstance(content, str):
+                    save_msg['content'] = content
+                elif isinstance(content, list):
+                    text_parts = []
+                    for part in content:
+                        if isinstance(part, dict) and part.get('type') == 'text':
+                            text_parts.append(part.get('text', ''))
+                    save_msg['content'] = '\n'.join(text_parts)
+                else:
+                    save_msg['content'] = str(content)
+
+                # Skip empty/streaming messages
+                if msg.get('_streaming') or not save_msg['content'].strip():
+                    continue
+
+                save_data['conversation'].append(save_msg)
+
+            # Write atomically (write to temp, then rename)
+            temp_path = self._autosave_path + '.tmp'
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+
+            # Rename to final path (atomic on most systems)
+            import shutil
+            shutil.move(temp_path, self._autosave_path)
+
+        except Exception as e:
+            print(f"[AutoSave] Error: {e}")
+
+    def check_autosave_recovery(self):
+        """Check for an auto-save file and offer to recover it."""
+        try:
+            if not os.path.exists(self._autosave_path):
+                return False
+
+            with open(self._autosave_path, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+
+            timestamp = save_data.get('timestamp', 'unknown time')
+            msg_count = len(save_data.get('conversation', []))
+
+            if msg_count < 2:
+                # Not worth recovering
+                os.remove(self._autosave_path)
+                return False
+
+            # Ask user if they want to recover
+            from PyQt6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self.app,
+                "Recover Previous Session?",
+                f"Found auto-saved conversation from {timestamp}\n"
+                f"({msg_count} messages)\n\n"
+                f"Would you like to recover it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Restore conversation
+                self.app.main_conversation = save_data['conversation']
+                self.app.left_pane.conversation = self.app.main_conversation
+                self.app.left_pane.render_conversation()
+                self.app.statusBar().showMessage(f"Recovered {msg_count} messages from auto-save")
+                print(f"[AutoSave] Recovered {msg_count} messages from {timestamp}")
+                return True
+            else:
+                # User declined - remove the file
+                os.remove(self._autosave_path)
+                return False
+
+        except Exception as e:
+            print(f"[AutoSave] Recovery error: {e}")
+            return False
+
+    def clear_autosave(self):
+        """Clear the auto-save file (e.g., after clean exit or reset)."""
+        try:
+            if os.path.exists(self._autosave_path):
+                os.remove(self._autosave_path)
+        except Exception:
+            pass
+
     def _on_video_ready(self, video_path: str, prompt: str, ai_name: str, model: str):
         """Handle video ready signal - runs on main thread"""
         try:
@@ -1623,6 +1751,18 @@ class ConversationManager:
         
         # Append chunk to buffer
         self._streaming_buffers[ai_name] += chunk
+
+        # Track typing speed
+        if not hasattr(self, '_streaming_start_times'):
+            self._streaming_start_times = {}
+        if ai_name not in self._streaming_start_times:
+            self._streaming_start_times[ai_name] = time.time()
+
+        elapsed = time.time() - self._streaming_start_times[ai_name]
+        if elapsed > 0.5:  # Update speed after 0.5s to get stable reading
+            chars_per_sec = len(self._streaming_buffers[ai_name]) / elapsed
+            if hasattr(self.app, 'statusBar'):
+                self.app.statusBar().showMessage(f"{ai_name}: {int(chars_per_sec)} chars/s")
         
         # Update the placeholder message content in the conversation data
         if hasattr(self, '_streaming_messages') and ai_name in self._streaming_messages:
@@ -1731,6 +1871,8 @@ class ConversationManager:
         # Get streaming tracking data BEFORE clearing
         if hasattr(self, '_streaming_buffers') and ai_name in self._streaming_buffers:
             del self._streaming_buffers[ai_name]
+        if hasattr(self, '_streaming_start_times') and ai_name in self._streaming_start_times:
+            del self._streaming_start_times[ai_name]
         if hasattr(self, '_streaming_messages') and ai_name in self._streaming_messages:
             streaming_msg = self._streaming_messages[ai_name]
             del self._streaming_messages[ai_name]
@@ -2016,6 +2158,10 @@ class ConversationManager:
             return self._execute_prompt_command(params.get('text', ''), ai_name)
         elif action == 'temperature':
             return self._execute_temperature_command(params.get('value'), ai_name)
+        elif action == 'vote':
+            return self._execute_vote_command(params.get('question', ''), params.get('options'), ai_name)
+        elif action == 'whisper':
+            return self._execute_whisper_command(params.get('target', ''), params.get('message', ''), ai_name)
         else:
             # Get AI's model name for consistent formatting
             ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
@@ -2471,7 +2617,86 @@ class ConversationManager:
 
         # Show the actual value in notification for human
         return True, f"🌡️ [{ai_name} ({model_name})]: !temperature {temp}"
-    
+
+    def _execute_vote_command(self, question: str, options_str: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a vote/poll command - creates a poll visible to all AIs."""
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
+        if not question:
+            return False, f"❌ [{ai_name} ({model_name})]: !vote — no question provided"
+
+        # Parse options if provided (comma-separated)
+        options = []
+        if options_str:
+            options = [opt.strip().strip('"').strip("'") for opt in options_str.split(',') if opt.strip()]
+
+        # Build poll display
+        poll_text = f"📊 POLL by {ai_name} ({model_name}): {question}"
+        if options:
+            for i, opt in enumerate(options, 1):
+                poll_text += f"\n  {i}. {opt}"
+        else:
+            poll_text += "\n  (Open-ended — respond with your thoughts)"
+
+        # Store active poll for tracking
+        if not hasattr(self, '_active_polls'):
+            self._active_polls = []
+        self._active_polls.append({
+            'question': question,
+            'options': options,
+            'creator': ai_name,
+            'votes': {}
+        })
+
+        return True, poll_text
+
+    def _execute_whisper_command(self, target: str, message: str, ai_name: str) -> tuple[bool, str]:
+        """Execute a whisper command - private message to a specific AI."""
+        ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        model_name = self.get_model_for_ai(ai_num)
+
+        if not target or not message:
+            return False, f"❌ [{ai_name} ({model_name})]: !whisper — missing target or message"
+
+        # Normalize target (accept "AI-1", "ai-1", "1", etc.)
+        target_normalized = target.upper().strip()
+        if not target_normalized.startswith('AI-'):
+            target_normalized = f"AI-{target_normalized}"
+
+        # Check if target AI exists (based on current number of AIs)
+        try:
+            target_num = int(target_normalized.split('-')[1])
+            num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
+            if target_num < 1 or target_num > num_ais:
+                return False, f"❌ [{ai_name} ({model_name})]: !whisper — {target_normalized} doesn't exist (only {num_ais} AIs active)"
+        except (ValueError, IndexError):
+            return False, f"❌ [{ai_name} ({model_name})]: !whisper — invalid target '{target}'"
+
+        # Add the whisper as a hidden message that only appears in the target's context
+        # We create a special message that gets filtered per-AI during turn processing
+        whisper_msg = {
+            "role": "system",
+            "content": f"[Private whisper from {ai_name} ({model_name})]: {message}",
+            "_type": "whisper",
+            "_whisper_from": ai_name,
+            "_whisper_to": target_normalized,
+            "hidden": True  # Hidden from main display
+        }
+
+        # Add to conversation
+        if self.app.active_branch:
+            branch_id = self.app.active_branch
+            if branch_id in self.app.branch_conversations:
+                self.app.branch_conversations[branch_id]['conversation'].append(whisper_msg)
+        else:
+            if not hasattr(self.app, 'main_conversation'):
+                self.app.main_conversation = []
+            self.app.main_conversation.append(whisper_msg)
+
+        # Show notification (visible) but actual whisper content is private
+        return True, f"🤫 [{ai_name} ({model_name})]: whispered to {target_normalized}"
+
     def get_model_for_ai(self, ai_number):
         """Get the selected model ID for the AI by number (1-5)"""
         selectors = {
@@ -3473,6 +3698,7 @@ def create_gui():
     # Create conversation manager
     manager = ConversationManager(main_window)
     manager.initialize()
+    main_window._conversation_manager = manager  # Store reference for auto-save recovery
     
     # Initialize debug tools if DEVELOPER_TOOLS is enabled
     debug_manager = None
@@ -3529,6 +3755,11 @@ def run_gui(main_window, app):
             print(f"Warning: Could not start freeze detector: {e}")
     
     main_window.show()
+
+    # Check for auto-save recovery after UI is ready
+    if hasattr(main_window, '_conversation_manager'):
+        QTimer.singleShot(500, main_window._conversation_manager.check_autosave_recovery)
+
     sys.exit(app.exec())
 
 if __name__ == "__main__":

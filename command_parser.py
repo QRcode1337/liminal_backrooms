@@ -35,6 +35,8 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
         !add_ai "model" "persona" - Add a new AI participant
         !remove_ai "AI-X" - Remove an AI participant
         !mute_self - Skip this AI's next turn
+        !vote "question" [option1, option2, ...] - Start a poll with optional choices
+        !whisper "AI-X" "message" - Send a private message to a specific AI
     """
     commands = []
     cleaned = response_text
@@ -54,6 +56,8 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
         'list_models': r'!list_models\b',
         # 'branch' command disabled - underlying function needs work
         'mute_self': r'!mute_self\b',
+        'vote': r'!vote\s+(?:"([^"]+)"|\'([^\']+)\')\s*(?:\[([^\]]*)\])?',
+        'whisper': r'!whisper\s+(?:"([^"]+)"|\'([^\']+)\')\s+(?:"([^"]+)"|\'([^\']+)\')',
     }
     
     for action, pattern in patterns.items():
@@ -93,6 +97,16 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
                 params = {'target': get_first_value(0, 1)}
             elif action == 'list_models':
                 params = {}
+            elif action == 'vote':
+                params = {
+                    'question': get_first_value(0, 1),
+                    'options': get_first_value(2, None)  # Optional comma-separated options
+                }
+            elif action == 'whisper':
+                params = {
+                    'target': get_first_value(0, 1),
+                    'message': get_first_value(2, 3)
+                }
             elif action == 'mute_self':
                 params = {}
             else:
@@ -107,7 +121,7 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
             
             # Strip !prompt and !temperature commands from text so other AIs don't see them
             # (keeps self-modifications private to each AI)
-            if action in ('prompt', 'temperature'):
+            if action in ('prompt', 'temperature', 'whisper'):
                 cleaned = cleaned.replace(match.group(0), '')
     
     # Clean up extra whitespace but preserve content

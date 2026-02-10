@@ -25,7 +25,7 @@ import webbrowser
 import subprocess
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap, QShortcut
 from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect
 
 from config import (
@@ -33,7 +33,8 @@ from config import (
     SYSTEM_PROMPT_PAIRS,
     SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT,
     OUTPUTS_DIR,
-    DEVELOPER_TOOLS
+    DEVELOPER_TOOLS,
+    TURN_DELAY
 )
 
 # Import centralized styling - single source of truth for colors and widget styles
@@ -71,21 +72,76 @@ class MessageWidget(QFrame):
     
     # AI color mapping - matches styles.py COLORS
     AI_COLORS = {
-        1: '#6FFFE6',  # Bright Aqua
-        2: '#06E2D4',  # Teal
-        3: '#54F5E9',  # Turquoise
-        4: '#8BFCEF',  # Light Cyan
-        5: '#91FCFD',  # Pale Cyan
+        1: COLORS['ai_1'],  # Bright phosphor green
+        2: COLORS['ai_2'],  # Lighter green
+        3: COLORS['ai_3'],  # Mint green
+        4: COLORS['ai_4'],  # Pale green
+        5: COLORS['ai_5'],  # Near-white green
     }
-    HUMAN_COLOR = '#ff00b3'  # Hot Pink/Magenta
+    HUMAN_COLOR = COLORS['human']  # Amber
     TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
     
     def __init__(self, message_data, parent=None):
         super().__init__(parent)
         self.message_data = message_data
         self._content_label = None  # Reference to content label for updates
+        self._creation_time = datetime.now()
         self._setup_ui()
+        self._setup_tooltip()
     
+    def _setup_tooltip(self):
+        """Set up hover tooltip showing message timestamp and metadata."""
+        # Try to get timestamp from message data, fallback to creation time
+        ts = self.message_data.get('timestamp') or self.message_data.get('_timestamp')
+        if ts:
+            if isinstance(ts, str):
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    time_str = dt.strftime('%H:%M:%S')
+                    date_str = dt.strftime('%Y-%m-%d')
+                except (ValueError, TypeError):
+                    time_str = ts
+                    date_str = ''
+            elif isinstance(ts, (int, float)):
+                dt = datetime.fromtimestamp(ts)
+                time_str = dt.strftime('%H:%M:%S')
+                date_str = dt.strftime('%Y-%m-%d')
+            else:
+                time_str = str(ts)
+                date_str = ''
+        else:
+            time_str = self._creation_time.strftime('%H:%M:%S')
+            date_str = self._creation_time.strftime('%Y-%m-%d')
+
+        # Build tooltip parts
+        role = self.message_data.get('role', '')
+        ai_name = self.message_data.get('ai_name', '')
+        model = self.message_data.get('model', '')
+
+        tooltip_parts = []
+        if date_str:
+            tooltip_parts.append(f"{date_str} {time_str}")
+        else:
+            tooltip_parts.append(time_str)
+
+        if model:
+            tooltip_parts.append(f"Model: {model}")
+
+        # Estimate token count for this message
+        content = self.message_data.get('content', '')
+        if isinstance(content, str):
+            char_count = len(content)
+        elif isinstance(content, list):
+            char_count = sum(len(p.get('text', '')) for p in content if isinstance(p, dict) and p.get('type') == 'text')
+        else:
+            char_count = 0
+
+        if char_count > 0:
+            est_tokens = char_count // 4
+            tooltip_parts.append(f"~{est_tokens} tokens ({char_count} chars)")
+
+        self.setToolTip('\n'.join(tooltip_parts))
+
     def _setup_ui(self):
         """Build the widget UI based on message data."""
         layout = QVBoxLayout(self)
@@ -165,10 +221,10 @@ class MessageWidget(QFrame):
         result = []
         
         # Colors for code blocks
-        code_bg = '#0F1419'
-        header_bg = '#1A1F26'
-        border_color = COLORS.get('border', '#2D3748')
-        code_text_color = '#E2E8F0'
+        code_bg = '#001100'
+        header_bg = '#002200'
+        border_color = COLORS.get('border', '#0D3B0D')
+        code_text_color = '#E0E0E0'
         
         for part in parts:
             if part[0] == 'code_block':
@@ -221,18 +277,20 @@ class MessageWidget(QFrame):
         return ''.join(result)
     
     def _create_header_widget(self, name_text, color):
-        """Create a header widget with name (no timestamp)."""
+        """Create a header widget with name."""
         header_widget = QWidget()
         header_widget.setStyleSheet("background-color: transparent;")
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
-        
+
         # Name label (left)
         name_label = QLabel(name_text)
         name_label.setStyleSheet(f"background-color: transparent; color: {color}; font-weight: bold; font-size: 9pt;")
         header_layout.addWidget(name_label)
-        
+
+        header_layout.addStretch()
+
         return header_widget
     
     def _get_ai_color(self):
@@ -253,7 +311,7 @@ class MessageWidget(QFrame):
             ai_num = 1
             
         return self.AI_COLORS.get(ai_num, self.AI_COLORS[1])
-    
+
     def _setup_typing_indicator(self):
         """Setup typing indicator style."""
         ai_name = self.message_data.get('ai_name', 'AI')
@@ -301,13 +359,13 @@ class MessageWidget(QFrame):
         """Setup agent notification style with color-matching backgrounds."""
         command_success = self.message_data.get('_command_success')
         if command_success is False:
-            bg_color = "#2a1a1a"  # Dark red tint
+            bg_color = "#1A0000"  # Dark red tint
             border_color = "#ff4444"  # Bright red (distinct from human pink)
         elif command_success is True:
-            bg_color = "#1a2a1a"  # Dark green tint
+            bg_color = "#001A00"  # Dark green tint
             border_color = COLORS.get('notify_success', '#5DFF44')
         else:
-            bg_color = "#2a2a1a"  # Dark yellow tint
+            bg_color = "#1A1A00"  # Dark yellow tint
             border_color = COLORS.get('notify_info', '#FFFF48')
         
         self.setStyleSheet(f"""
@@ -379,14 +437,34 @@ class MessageWidget(QFrame):
             prompt_label.setWordWrap(True)
             self.layout().addWidget(prompt_label)
         
-        # Display image
+        # Display image - scales to fill available width
         if image_path and os.path.exists(image_path):
             img_label = QLabel()
             img_label.setStyleSheet("background-color: transparent;")
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
-                scaled = pixmap.scaledToWidth(400, Qt.TransformationMode.SmoothTransformation)
+                img_label._original_pixmap = pixmap
+                # Scale to available width (with padding margin)
+                avail_width = max(400, self.width() - 40)
+                if pixmap.width() > avail_width:
+                    scaled = pixmap.scaledToWidth(avail_width, Qt.TransformationMode.SmoothTransformation)
+                else:
+                    scaled = pixmap
                 img_label.setPixmap(scaled)
+                # Re-scale on resize
+                orig_resize = img_label.resizeEvent
+                def _on_resize(event, lbl=img_label):
+                    pm = getattr(lbl, '_original_pixmap', None)
+                    if pm and not pm.isNull():
+                        w = lbl.parent().width() - 40 if lbl.parent() else lbl.width()
+                        w = max(200, w)
+                        if pm.width() > w:
+                            lbl.setPixmap(pm.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation))
+                        else:
+                            lbl.setPixmap(pm)
+                    if orig_resize:
+                        orig_resize(event)
+                img_label.resizeEvent = _on_resize
                 self.layout().addWidget(img_label)
     
     def _setup_generated_video(self):
@@ -465,7 +543,7 @@ class MessageWidget(QFrame):
         display_name = f"{ai_name} ({model})" if model else ai_name
         header = self._create_header_widget(display_name, border_color)
         self.layout().addWidget(header)
-        
+
         # Format code blocks and use RichText
         formatted_text = self._format_code_blocks(text)
         content = QLabel(formatted_text)
@@ -512,7 +590,24 @@ class MessageWidget(QFrame):
         content.setTextFormat(Qt.TextFormat.RichText)
         self.layout().addWidget(content)
         self._content_label = content
-    
+
+    def mouseDoubleClickEvent(self, event):
+        """Copy message text to clipboard on double-click."""
+        content = self.message_data.get('content', '')
+        if isinstance(content, list):
+            text = ' '.join(p.get('text', '') for p in content if isinstance(p, dict) and p.get('type') == 'text')
+        else:
+            text = str(content)
+
+        if text.strip():
+            QApplication.clipboard().setText(text)
+            # Brief visual feedback - flash the border
+            original_style = self.styleSheet()
+            self.setStyleSheet(original_style + f"\nMessageWidget {{ border: 1px solid {COLORS['accent_cyan']}; }}")
+            QTimer.singleShot(300, lambda: self.setStyleSheet(original_style))
+
+        super().mouseDoubleClickEvent(event)
+
     def update_content(self, new_text):
         """Update the content of this message (for streaming).
         
@@ -526,17 +621,270 @@ class MessageWidget(QFrame):
             self._content_label.setText(formatted_text)
 
 
+class SearchOverlay(QWidget):
+    """Search bar overlay for finding text in conversation."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(36)
+        self.match_indices = []  # List of (widget_index, text_position) for matches
+        self.current_match = -1
+        self._setup_ui()
+        self.hide()  # Hidden by default
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-bottom: 1px solid {COLORS['border_glow']};
+            }}
+        """)
+
+        # Search icon label
+        icon_label = QLabel("\U0001f50d")
+        icon_label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-size: 12px; border: none;")
+        layout.addWidget(icon_label)
+
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search conversation...")
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_bright']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                padding: 4px 8px;
+                font-size: 10px;
+            }}
+            QLineEdit:focus {{
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        self.search_input.returnPressed.connect(self._next_match)
+        layout.addWidget(self.search_input)
+
+        # Match counter
+        self.match_label = QLabel("")
+        self.match_label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-size: 9px; border: none; min-width: 60px;")
+        layout.addWidget(self.match_label)
+
+        # Navigation buttons
+        prev_btn = QPushButton("\u25b2")
+        prev_btn.setFixedSize(24, 24)
+        prev_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['accent_cyan']};
+                border: 1px solid {COLORS['border_glow']};
+                border-radius: 0px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
+            }}
+        """)
+        prev_btn.clicked.connect(self._prev_match)
+        layout.addWidget(prev_btn)
+
+        next_btn = QPushButton("\u25bc")
+        next_btn.setFixedSize(24, 24)
+        next_btn.setStyleSheet(prev_btn.styleSheet())
+        next_btn.clicked.connect(self._next_match)
+        layout.addWidget(next_btn)
+
+        # Close button
+        close_btn = QPushButton("\u2715")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {COLORS['text_dim']};
+                border: none;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                color: {COLORS['accent_pink']};
+            }}
+        """)
+        close_btn.clicked.connect(self.close_search)
+        layout.addWidget(close_btn)
+
+    def toggle(self):
+        """Toggle search bar visibility."""
+        if self.isVisible():
+            self.close_search()
+        else:
+            self.show()
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+
+    def close_search(self):
+        """Close search and clear highlights."""
+        self.hide()
+        self.search_input.clear()
+        self.match_indices = []
+        self.current_match = -1
+        self.match_label.setText("")
+        self._clear_highlights()
+
+    def _on_search_changed(self, text):
+        """Search text changed - find all matches."""
+        self.match_indices = []
+        self.current_match = -1
+        self._clear_highlights()
+
+        if not text or len(text) < 2:
+            self.match_label.setText("")
+            return
+
+        # Find matches in parent's chat scroll area
+        chat_area = self._get_chat_area()
+        if not chat_area:
+            return
+
+        search_lower = text.lower()
+        container = chat_area.widget()
+        if not container:
+            return
+
+        layout = container.layout()
+        if not layout:
+            return
+
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            if not isinstance(widget, MessageWidget):
+                continue
+
+            # Check message content
+            msg_text = widget.message_data.get('content', '')
+            if isinstance(msg_text, list):
+                msg_text = ' '.join(p.get('text', '') for p in msg_text if isinstance(p, dict) and p.get('type') == 'text')
+
+            if search_lower in str(msg_text).lower():
+                self.match_indices.append(i)
+
+        if self.match_indices:
+            self.current_match = 0
+            self.match_label.setText(f"1/{len(self.match_indices)}")
+            self._highlight_current()
+        else:
+            self.match_label.setText("0 results")
+
+    def _next_match(self):
+        """Go to next match."""
+        if not self.match_indices:
+            return
+        self.current_match = (self.current_match + 1) % len(self.match_indices)
+        self.match_label.setText(f"{self.current_match + 1}/{len(self.match_indices)}")
+        self._highlight_current()
+
+    def _prev_match(self):
+        """Go to previous match."""
+        if not self.match_indices:
+            return
+        self.current_match = (self.current_match - 1) % len(self.match_indices)
+        self.match_label.setText(f"{self.current_match + 1}/{len(self.match_indices)}")
+        self._highlight_current()
+
+    def _highlight_current(self):
+        """Highlight and scroll to current match."""
+        if self.current_match < 0 or not self.match_indices:
+            return
+
+        chat_area = self._get_chat_area()
+        if not chat_area:
+            return
+
+        widget_idx = self.match_indices[self.current_match]
+        container = chat_area.widget()
+        if not container:
+            return
+
+        layout = container.layout()
+        if not layout:
+            return
+
+        item = layout.itemAt(widget_idx)
+        if not item or not item.widget():
+            return
+
+        target = item.widget()
+
+        # Clear all highlights first
+        self._clear_highlights()
+
+        # Add highlight border to matching widgets
+        for idx in self.match_indices:
+            match_item = layout.itemAt(idx)
+            if match_item and match_item.widget():
+                w = match_item.widget()
+                # Store original style
+                if not hasattr(w, '_original_border_style'):
+                    w._original_border_style = w.styleSheet()
+                current_style = w.styleSheet()
+                if idx == widget_idx:
+                    # Current match - bright highlight
+                    w.setStyleSheet(current_style + f"\nMessageWidget {{ border-right: 3px solid {COLORS['accent_cyan']}; }}")
+                else:
+                    # Other matches - dim highlight
+                    w.setStyleSheet(current_style + f"\nMessageWidget {{ border-right: 2px solid {COLORS['text_dim']}; }}")
+
+        # Scroll to the target widget
+        chat_area.ensureWidgetVisible(target, 50, 50)
+
+    def _clear_highlights(self):
+        """Clear all search highlights."""
+        chat_area = self._get_chat_area()
+        if not chat_area:
+            return
+
+        container = chat_area.widget()
+        if not container:
+            return
+
+        layout = container.layout()
+        if not layout:
+            return
+
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            w = item.widget()
+            if hasattr(w, '_original_border_style'):
+                w.setStyleSheet(w._original_border_style)
+                del w._original_border_style
+
+    def _get_chat_area(self):
+        """Get the ChatScrollArea from parent hierarchy."""
+        parent = self.parent()
+        if hasattr(parent, 'conversation_display'):
+            return parent.conversation_display
+        return None
+
+
 class ChatScrollArea(QScrollArea):
     """
     Scroll area for chat messages with smart auto-scroll behavior.
-    
+
     ═══════════════════════════════════════════════════════════════════════════
     SCROLL SYSTEM ARCHITECTURE
     ═══════════════════════════════════════════════════════════════════════════
-    
+
     This widget solves the "chat scroll problem": auto-scroll to bottom for new
     messages, BUT respect when user scrolls up to read history.
-    
+
     KEY CONCEPTS:
     ─────────────
     • _should_follow: True = auto-scroll to bottom on new content
@@ -635,13 +983,19 @@ class ChatScrollArea(QScrollArea):
     
     ═══════════════════════════════════════════════════════════════════════════
     """
-    
+
+    ZOOM_MIN = 50
+    ZOOM_MAX = 200
+    ZOOM_STEP = 10
+    ZOOM_DEFAULT = 100
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # ─── Scroll State ───────────────────────────────────────────────────
         self._should_follow = True    # True = auto-scroll to bottom on new content
         self._programmatic_scroll = False  # True = ignore _on_scroll (we're scrolling)
+        self._zoom_level = self.ZOOM_DEFAULT  # Current zoom level (50-200%)
         
         # ─── Debug Settings ─────────────────────────────────────────────────
         # Set to True to enable scroll debug logging to console
@@ -809,13 +1163,25 @@ class ChatScrollArea(QScrollArea):
         self._programmatic_scroll = True
         sb.setValue(sb.maximum())
         self._programmatic_scroll = False
-        
+
+        # Double-tap: schedule another scroll after layout settles
+        QTimer.singleShot(0, self._finalize_scroll)
+
         # Log significant position changes (reduces spam)
         if self._debug:
             if not hasattr(self, '_last_logged_max') or abs(sb.maximum() - self._last_logged_max) > 100:
                 print(f"[CHAT-SCROLL] Auto-scrolled to bottom (max={sb.maximum()})")
                 self._last_logged_max = sb.maximum()
     
+    def _finalize_scroll(self):
+        """Second scroll pass to catch late layout changes."""
+        if self._should_follow:
+            sb = self.verticalScrollBar()
+            if sb.value() < sb.maximum():
+                self._programmatic_scroll = True
+                sb.setValue(sb.maximum())
+                self._programmatic_scroll = False
+
     def clear_messages(self, reset_scroll=False):
         """
         Remove all message widgets from the chat.
@@ -847,7 +1213,45 @@ class ChatScrollArea(QScrollArea):
         self._schedule_scroll()
         if self._debug:
             print("[CHAT-SCROLL] Reset scroll state to follow mode")
-    
+
+    def set_zoom(self, level):
+        """Set zoom level (50-200%). Applies font scaling to all messages."""
+        level = max(self.ZOOM_MIN, min(self.ZOOM_MAX, level))
+        if level == self._zoom_level:
+            return
+        self._zoom_level = level
+        scale = level / 100.0
+        base_size = max(7, int(10 * scale))  # Base 10pt, min 7pt
+
+        # Update container font
+        font = self.container.font()
+        font.setPointSize(base_size)
+        self.container.setFont(font)
+
+        # Update all existing message widgets
+        for widget in self.message_widgets:
+            if hasattr(widget, '_content_label') and widget._content_label:
+                wfont = widget._content_label.font()
+                wfont.setPointSize(base_size)
+                widget._content_label.setFont(wfont)
+
+        # Notify parent for status bar update
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, '_update_zoom_label'):
+                parent._update_zoom_label(level)
+                break
+            parent = parent.parent()
+
+    def zoom_in(self):
+        self.set_zoom(self._zoom_level + self.ZOOM_STEP)
+
+    def zoom_out(self):
+        self.set_zoom(self._zoom_level - self.ZOOM_STEP)
+
+    def zoom_reset(self):
+        self.set_zoom(self.ZOOM_DEFAULT)
+
     def _scroll_to_bottom(self):
         """Public method to trigger scroll to bottom (debounced)."""
         self._schedule_scroll()
@@ -1053,16 +1457,16 @@ class DepthGauge(QWidget):
             # Gradient fill
             gradient = QLinearGradient(0, fill_y, 0, margin + gauge_height)
             
-            # Color shifts based on depth - deeper = more purple/pink
+            # Color shifts based on depth - deeper = brighter green
             if progress < 0.33:
-                gradient.setColorAt(0, QColor(COLORS['accent_cyan']))
-                gradient.setColorAt(1, QColor(COLORS['accent_cyan']).darker(130))
+                gradient.setColorAt(0, QColor('#00FF41'))
+                gradient.setColorAt(1, QColor('#006B1A'))
             elif progress < 0.66:
-                gradient.setColorAt(0, QColor(COLORS['accent_purple']))
-                gradient.setColorAt(1, QColor(COLORS['accent_cyan']))
+                gradient.setColorAt(0, QColor('#33FF66'))
+                gradient.setColorAt(1, QColor('#00FF41'))
             else:
-                gradient.setColorAt(0, QColor(COLORS['accent_pink']))
-                gradient.setColorAt(1, QColor(COLORS['accent_purple']))
+                gradient.setColorAt(0, QColor('#CCFFEE'))
+                gradient.setColorAt(1, QColor('#33FF66'))
             
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(gradient)
@@ -1070,7 +1474,7 @@ class DepthGauge(QWidget):
             
             # Pulsing glow line at top of fill
             pulse_alpha = int(100 + 80 * math.sin(math.radians(self.pulse_offset)))
-            glow_color = QColor(COLORS['accent_cyan'])
+            glow_color = QColor('#00FF41')
             glow_color.setAlpha(pulse_alpha)
             painter.setPen(QPen(glow_color, 2))
             painter.drawLine(margin + 2, fill_y, margin + gauge_width - 2, fill_y)
@@ -2532,6 +2936,151 @@ class VideoPreviewPane(QWidget):
             subprocess.Popen(f'explorer "{videos_dir}"')
 
 
+class StatsWidget(QWidget):
+    """Live conversation statistics display"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.stats = {
+            'turns': 0,
+            'active_ais': [],
+            'est_tokens': 0,
+            'avg_response_ms': 0,
+            'images_generated': 0,
+            'commands_executed': 0,
+            'response_times': [],
+        }
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
+
+        # Title
+        title = QLabel("LIVE STATS")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(f"""
+            color: {COLORS['accent_cyan']};
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px;
+            background-color: {COLORS['bg_medium']};
+            border-bottom: 1px solid {COLORS['border_glow']};
+            letter-spacing: 3px;
+        """)
+        layout.addWidget(title)
+
+        # Stats grid
+        stats_container = QWidget()
+        stats_container.setStyleSheet(f"background-color: transparent;")
+        stats_layout = QVBoxLayout(stats_container)
+        stats_layout.setContentsMargins(8, 8, 8, 8)
+        stats_layout.setSpacing(8)
+
+        # Create stat rows
+        self.stat_labels = {}
+        stat_defs = [
+            ('turns', 'TURNS', '0'),
+            ('active_ais', 'ACTIVE AIs', '0'),
+            ('est_tokens', 'EST. TOKENS', '0'),
+            ('words', 'WORDS', '0'),
+            ('avg_response', 'AVG RESPONSE', '\u2014'),
+            ('images', 'IMAGES', '0'),
+            ('commands', 'COMMANDS', '0'),
+        ]
+
+        for key, label_text, default in stat_defs:
+            row = QWidget()
+            row.setStyleSheet(f"background-color: {COLORS['bg_medium']}; border-left: 2px solid {COLORS['border_glow']};")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(8, 4, 8, 4)
+
+            name_label = QLabel(label_text)
+            name_label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_dim']}; font-size: 9px; font-weight: bold; letter-spacing: 1px;")
+
+            value_label = QLabel(default)
+            value_label.setStyleSheet(f"background-color: transparent; color: {COLORS['accent_cyan']}; font-size: 12px; font-weight: bold;")
+            value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            row_layout.addWidget(name_label)
+            row_layout.addStretch()
+            row_layout.addWidget(value_label)
+
+            stats_layout.addWidget(row)
+            self.stat_labels[key] = value_label
+
+        layout.addWidget(stats_container)
+        layout.addStretch()
+
+    def update_stats(self, conversation, images_count=0, commands_count=0):
+        """Update stats from conversation data"""
+        if not conversation:
+            return
+
+        # Count turns (assistant messages only)
+        turns = sum(1 for m in conversation if m.get('role') == 'assistant')
+        self.stat_labels['turns'].setText(str(turns))
+
+        # Active AIs
+        ai_names = set()
+        for m in conversation:
+            name = m.get('ai_name', '')
+            if name:
+                ai_names.add(name)
+        self.stat_labels['active_ais'].setText(str(len(ai_names)))
+
+        # Estimate tokens (~4 chars per token)
+        total_chars = 0
+        for m in conversation:
+            content = m.get('content', '')
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if part.get('type') == 'text':
+                        total_chars += len(part.get('text', ''))
+        est_tokens = total_chars // 4
+        if est_tokens > 1000:
+            self.stat_labels['est_tokens'].setText(f"{est_tokens/1000:.1f}k")
+        else:
+            self.stat_labels['est_tokens'].setText(str(est_tokens))
+
+        # Word count
+        total_words = 0
+        for m in conversation:
+            content = m.get('content', '')
+            if isinstance(content, str):
+                total_words += len(content.split())
+            elif isinstance(content, list):
+                for part in content:
+                    if part.get('type') == 'text':
+                        total_words += len(part.get('text', '').split())
+        if total_words > 1000:
+            self.stat_labels['words'].setText(f"{total_words/1000:.1f}k")
+        else:
+            self.stat_labels['words'].setText(str(total_words))
+
+        # Response time
+        if self.stats['response_times']:
+            avg = sum(self.stats['response_times']) / len(self.stats['response_times'])
+            if avg > 1000:
+                self.stat_labels['avg_response'].setText(f"{avg/1000:.1f}s")
+            else:
+                self.stat_labels['avg_response'].setText(f"{int(avg)}ms")
+
+        # Images and commands
+        self.stat_labels['images'].setText(str(images_count))
+        self.stat_labels['commands'].setText(str(commands_count))
+
+    def record_response_time(self, ms):
+        """Record a response time for averaging"""
+        self.stats['response_times'].append(ms)
+        # Keep last 20 for rolling average
+        if len(self.stats['response_times']) > 20:
+            self.stats['response_times'] = self.stats['response_times'][-20:]
+
+
 class RightSidebar(QWidget):
     """Right sidebar with tabbed interface for Setup and Network Graph"""
     nodeSelected = pyqtSignal(str)
@@ -2564,7 +3113,8 @@ class RightSidebar(QWidget):
         self.graph_button = QPushButton("🌐 GRAPH")
         self.image_button = QPushButton("🖼 IMAGES")
         self.video_button = QPushButton("🎬 VIDEOS")
-        
+        self.stats_button = QPushButton("📊 STATS")
+
         # Cyberpunk tab button styling
         tab_style = f"""
             QPushButton {{
@@ -2593,12 +3143,14 @@ class RightSidebar(QWidget):
         self.graph_button.setStyleSheet(tab_style)
         self.image_button.setStyleSheet(tab_style)
         self.video_button.setStyleSheet(tab_style)
-        
+        self.stats_button.setStyleSheet(tab_style)
+
         # Make buttons checkable for tab behavior
         self.setup_button.setCheckable(True)
         self.graph_button.setCheckable(True)
         self.image_button.setCheckable(True)
         self.video_button.setCheckable(True)
+        self.stats_button.setCheckable(True)
         self.setup_button.setChecked(True)  # Start with setup tab active
         
         # Connect tab buttons
@@ -2606,12 +3158,14 @@ class RightSidebar(QWidget):
         self.graph_button.clicked.connect(lambda: self.switch_tab(1))
         self.image_button.clicked.connect(lambda: self.switch_tab(2))
         self.video_button.clicked.connect(lambda: self.switch_tab(3))
-        
+        self.stats_button.clicked.connect(lambda: self.switch_tab(4))
+
         tab_layout.addWidget(self.setup_button)
         tab_layout.addWidget(self.graph_button)
         tab_layout.addWidget(self.image_button)
         tab_layout.addWidget(self.video_button)
-        
+        tab_layout.addWidget(self.stats_button)
+
         layout.addWidget(tab_container)
         
         # Create stacked widget for tab content
@@ -2629,12 +3183,14 @@ class RightSidebar(QWidget):
         self.network_pane = NetworkPane()
         self.image_preview_pane = ImagePreviewPane()
         self.video_preview_pane = VideoPreviewPane()
-        
+        self.stats_widget = StatsWidget()
+
         # Add pages to stack
         self.stack.addWidget(self.control_panel)
         self.stack.addWidget(self.network_pane)
         self.stack.addWidget(self.image_preview_pane)
         self.stack.addWidget(self.video_preview_pane)
+        self.stack.addWidget(self.stats_widget)
         
         layout.addWidget(self.stack, 1)  # Stretch to fill
         
@@ -2650,6 +3206,7 @@ class RightSidebar(QWidget):
         self.graph_button.setChecked(index == 1)
         self.image_button.setChecked(index == 2)
         self.video_button.setChecked(index == 3)
+        self.stats_button.setChecked(index == 4)
     
     def update_image_preview(self, image_path, ai_name="", prompt=""):
         """Update the image preview pane with a new image"""
@@ -2673,6 +3230,130 @@ class RightSidebar(QWidget):
         """Forward to network pane"""
         self.network_pane.update_graph()
 
+class RetroSlider(QWidget):
+    """Terminal-style segmented slider with ASCII gauge display.
+
+    Visual: |####......| 6
+    Green fill bars on black, clickable segments, scroll wheel support.
+    """
+    valueChanged = pyqtSignal(int)
+    currentTextChanged = pyqtSignal(str)
+
+    def __init__(self, values=None, parent=None):
+        super().__init__(parent)
+        self.values = values or [1, 2, 4, 6, 12, 100]
+        self._index = 0
+        self.setFixedHeight(28)
+        self.setMinimumWidth(140)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    @property
+    def current_value(self):
+        return self.values[self._index]
+
+    def currentText(self):
+        """Compatibility with NoScrollComboBox interface."""
+        return str(self.current_value)
+
+    def set_value(self, val):
+        if val in self.values:
+            self._index = self.values.index(val)
+            self.update()
+            self.valueChanged.emit(self.current_value)
+            self.currentTextChanged.emit(str(self.current_value))
+
+    def setCurrentText(self, text):
+        """Compatibility with QComboBox interface."""
+        try:
+            val = int(text)
+            self.set_value(val)
+        except (ValueError, TypeError):
+            pass
+
+    def mousePressEvent(self, event):
+        segment_width = self.width() / len(self.values)
+        clicked_index = int(event.position().x() / segment_width)
+        clicked_index = max(0, min(len(self.values) - 1, clicked_index))
+        if clicked_index != self._index:
+            self._index = clicked_index
+            self.update()
+            self.valueChanged.emit(self.current_value)
+            self.currentTextChanged.emit(str(self.current_value))
+
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            new_idx = min(len(self.values) - 1, self._index + 1)
+        else:
+            new_idx = max(0, self._index - 1)
+        if new_idx != self._index:
+            self._index = new_idx
+            self.update()
+            self.valueChanged.emit(self.current_value)
+            self.currentTextChanged.emit(str(self.current_value))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        w, h = self.width(), self.height()
+
+        # Background
+        painter.fillRect(0, 0, w, h, QColor(COLORS['bg_dark']))
+
+        # Border
+        painter.setPen(QPen(QColor(COLORS['border_glow']), 1))
+        painter.drawRect(0, 0, w - 1, h - 1)
+
+        # Fill segments
+        pad = 3
+        usable_w = w - (pad * 2)
+        segment_w = usable_w / len(self.values)
+        gap = 1
+
+        for i in range(len(self.values)):
+            x = pad + int(i * segment_w)
+            seg_w = int(segment_w) - gap
+            if seg_w < 2:
+                seg_w = 2
+
+            if i <= self._index:
+                if i == self._index:
+                    color = QColor(COLORS['text_bright'])
+                else:
+                    color = QColor(COLORS['accent_cyan'])
+            else:
+                color = QColor(COLORS['border'])
+
+            painter.fillRect(x, pad + 1, seg_w, h - (pad * 2) - 2, color)
+
+        # Value text overlay
+        font = painter.font()
+        font.setFamily("Iosevka Term")
+        font.setPixelSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+
+        text = str(self.current_value)
+        fm = painter.fontMetrics()
+        text_w = fm.horizontalAdvance(text)
+        text_x = (w - text_w) // 2
+        text_y = (h + fm.ascent() - fm.descent()) // 2
+
+        # Text shadow for readability
+        painter.setPen(QColor(COLORS['bg_dark']))
+        painter.drawText(text_x + 1, text_y + 1, text)
+        painter.drawText(text_x - 1, text_y, text)
+
+        # Actual text
+        if self._index >= len(self.values) // 2:
+            painter.setPen(QColor(COLORS['bg_dark']))
+        else:
+            painter.setPen(QColor(COLORS['text_bright']))
+        painter.drawText(text_x, text_y, text)
+
+        painter.end()
+
+
 class ControlPanel(QWidget):
     """Control panel with mode, model selections, etc."""
     def __init__(self):
@@ -2684,6 +3365,40 @@ class ControlPanel(QWidget):
         # Initialize with models and prompt pairs
         self.initialize_selectors()
     
+    def _ascii_section_header(self, text, width=26):
+        """Create an ASCII box-drawing section header label."""
+        inner = f" {text} "
+        remaining = width - len(inner) - 2
+        left_dashes = remaining // 2
+        right_dashes = remaining - left_dashes
+        dash = "\u2500"
+        line = "\u250c" + dash * left_dashes + inner + dash * right_dashes + "\u2510"
+        label = QLabel(line)
+        label.setStyleSheet(f"""
+            color: {COLORS['accent_cyan']};
+            font-family: {FONTS['family_mono']};
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0px;
+            background-color: transparent;
+            padding: 2px 0px;
+        """)
+        return label
+
+    def _ascii_divider(self, width=26):
+        """Create an ASCII box-drawing divider."""
+        dash = "\u2500"
+        line = "\u251c" + dash * (width - 2) + "\u2524"
+        label = QLabel(line)
+        label.setStyleSheet(f"""
+            color: {COLORS['border_glow']};
+            font-family: {FONTS['family_mono']};
+            font-size: 10px;
+            background-color: transparent;
+            padding: 4px 0px 2px 0px;
+        """)
+        return label
+
     def setup_ui(self):
         """Set up the user interface for the control panel - vertical sidebar layout"""
         # Main layout
@@ -2734,8 +3449,7 @@ class ControlPanel(QWidget):
         mode_layout.setContentsMargins(0, 0, 0, 0)
         mode_layout.setSpacing(5)
         
-        mode_label = QLabel("▸ MODE")
-        mode_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        mode_label = self._ascii_section_header("MODE")
         mode_layout.addWidget(mode_label)
         
         self.mode_selector = NoScrollComboBox()
@@ -2749,13 +3463,11 @@ class ControlPanel(QWidget):
         iterations_layout.setContentsMargins(0, 0, 0, 0)
         iterations_layout.setSpacing(5)
         
-        iterations_label = QLabel("▸ ITERATIONS")
-        iterations_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        iterations_label = self._ascii_section_header("ITERATIONS")
         iterations_layout.addWidget(iterations_label)
         
-        self.iterations_selector = NoScrollComboBox()
-        self.iterations_selector.addItems(["1", "2", "4", "6", "12", "100"])
-        self.iterations_selector.setStyleSheet(get_combobox_style())
+        self.iterations_selector = RetroSlider(values=[1, 2, 4, 6, 12, 100])
+        self.iterations_selector.set_value(1)
         iterations_layout.addWidget(self.iterations_selector)
         
         # Number of AIs selection
@@ -2764,14 +3476,11 @@ class ControlPanel(QWidget):
         num_ais_layout.setContentsMargins(0, 0, 0, 0)
         num_ais_layout.setSpacing(5)
         
-        num_ais_label = QLabel("▸ NUMBER OF AIs")
-        num_ais_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        num_ais_label = self._ascii_section_header("NUMBER OF AIs")
         num_ais_layout.addWidget(num_ais_label)
         
-        self.num_ais_selector = NoScrollComboBox()
-        self.num_ais_selector.addItems(["1", "2", "3", "4", "5"])
-        self.num_ais_selector.setCurrentText("3")  # Default to 3 AIs
-        self.num_ais_selector.setStyleSheet(get_combobox_style())
+        self.num_ais_selector = RetroSlider(values=[1, 2, 3, 4, 5])
+        self.num_ais_selector.set_value(3)
         num_ais_layout.addWidget(self.num_ais_selector)
         
         # AI Invite Tier Setting - Button Group
@@ -2780,8 +3489,7 @@ class ControlPanel(QWidget):
         invite_tier_layout.setContentsMargins(0, 0, 0, 0)
         invite_tier_layout.setSpacing(5)
         
-        invite_tier_label = QLabel("▸ AI INVITE TIER")
-        invite_tier_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        invite_tier_label = self._ascii_section_header("AI INVITE TIER")
         invite_tier_layout.addWidget(invite_tier_label)
         
         # Info text
@@ -2819,12 +3527,12 @@ class ControlPanel(QWidget):
                 color: {COLORS['text_normal']};
             }}
             QPushButton:checked {{
-                background-color: #164E63;
+                background-color: {COLORS['bg_light']};
                 color: {COLORS['text_bright']};
                 border: 1px solid {COLORS['accent_cyan']};
             }}
         """
-        
+
         for btn in self._invite_tier_buttons:
             btn.setCheckable(True)
             btn.setStyleSheet(toggle_btn_style)
@@ -2948,12 +3656,10 @@ class ControlPanel(QWidget):
         controls_layout.addWidget(invite_tier_container)
         
         # Divider
-        divider1 = QLabel("─" * 20)
-        divider1.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        divider1 = self._ascii_divider()
         controls_layout.addWidget(divider1)
         
-        models_label = QLabel("▸ AI MODELS")
-        models_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        models_label = self._ascii_section_header("AI MODELS")
         controls_layout.addWidget(models_label)
         
         controls_layout.addWidget(self.ai1_container)
@@ -2963,24 +3669,20 @@ class ControlPanel(QWidget):
         controls_layout.addWidget(self.ai5_container)
         
         # Divider
-        divider2 = QLabel("─" * 20)
-        divider2.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        divider2 = self._ascii_divider()
         controls_layout.addWidget(divider2)
         
-        scenario_label = QLabel("▸ SCENARIO")
-        scenario_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        scenario_label = self._ascii_section_header("SCENARIO")
         controls_layout.addWidget(scenario_label)
         
         controls_layout.addWidget(prompt_container)
         
         # Divider
-        divider3 = QLabel("─" * 20)
-        divider3.setStyleSheet(f"color: {COLORS['border_glow']}; font-size: 8px;")
+        divider3 = self._ascii_divider()
         controls_layout.addWidget(divider3)
         
         # OPTIONS section (in scrollable area)
-        options_label = QLabel("▸ OPTIONS")
-        options_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px;")
+        options_label = self._ascii_section_header("OPTIONS")
         controls_layout.addWidget(options_label)
         
         # Auto-generate images checkbox
@@ -3011,8 +3713,7 @@ class ControlPanel(QWidget):
         action_layout.setSpacing(8)
         
         # Actions - buttons in vertical layout
-        actions_label = QLabel("▸ ACTIONS")
-        actions_label.setStyleSheet(f"color: {COLORS['text_glow']}; font-size: 10px; font-weight: bold; letter-spacing: 1px; background: transparent; border: none;")
+        actions_label = self._ascii_section_header("ACTIONS")
         action_layout.addWidget(actions_label)
         
         # Export button
@@ -3451,7 +4152,11 @@ class ConversationPane(QWidget):
         # Add input container to main layout
         input_layout.addWidget(button_container)
         
+        # Search overlay
+        self.search_overlay = SearchOverlay(self)
+
         # Add widgets to layout with adjusted stretch factors
+        layout.addWidget(self.search_overlay)
         layout.addWidget(self.conversation_display, 1)  # Main conversation area gets most space
         layout.addWidget(input_container, 0)  # Input area gets minimal space
     
@@ -3606,14 +4311,18 @@ class ConversationPane(QWidget):
         
         print("[UI] Conversation reset by user")
     
+    def toggle_search(self):
+        """Toggle the search overlay."""
+        self.search_overlay.toggle()
+
     def set_input_callback(self, callback):
         """Set callback function for input submission"""
         self.input_callback = callback
-    
+
     def set_rabbithole_callback(self, callback):
         """Set callback function for rabbithole creation"""
         self.rabbithole_callback = callback
-    
+
     def set_fork_callback(self, callback):
         """Set callback function for fork creation"""
         self.fork_callback = callback
@@ -3815,8 +4524,33 @@ class ConversationPane(QWidget):
                     self._rebuild_all_messages(displayable)
                 # If count same: do nothing - streaming updates widget directly
             else:
-                # REBUILD MODE: Always rebuild for correctness
-                # This handles: streaming complete, notification→image, content changes
+                # NON-STREAMING MODE: Append-or-rebuild strategy
+                # Build a lightweight fingerprint from message count + content lengths
+                fp_parts = []
+                for m in displayable:
+                    c = m.get('content', '')
+                    if isinstance(c, str):
+                        fp_parts.append((m.get('role', ''), m.get('ai_name', ''), len(c), m.get('_type', '')))
+                    else:
+                        fp_parts.append((m.get('role', ''), m.get('ai_name', ''), -1, m.get('_type', '')))
+                fingerprint = hash(tuple(fp_parts))
+
+                if hasattr(self, '_last_render_fingerprint') and self._last_render_fingerprint == fingerprint:
+                    return  # Nothing changed, skip entirely
+                self._last_render_fingerprint = fingerprint
+
+                # If only new messages were appended (existing are unchanged), just append
+                if new_count > existing_count and existing_count > 0:
+                    # Verify existing messages haven't changed (compare first few fingerprint parts)
+                    old_fp = getattr(self, '_last_render_fp_parts', [])
+                    if len(old_fp) == existing_count and old_fp == fp_parts[:existing_count]:
+                        # Safe to append only the new ones
+                        for i in range(existing_count, new_count):
+                            self.conversation_display.add_message(displayable[i])
+                        self._last_render_fp_parts = fp_parts
+                        return
+
+                self._last_render_fp_parts = fp_parts
                 if existing_count > 0 or new_count > 0:
                     self._rebuild_all_messages(displayable)
                 
@@ -3845,6 +4579,9 @@ class ConversationPane(QWidget):
         """
         # Save scroll state before rebuild
         saved_should_follow = self.conversation_display._should_follow
+        sb = self.conversation_display.verticalScrollBar()
+        saved_scroll_value = sb.value()
+        saved_scroll_max = sb.maximum()
         num_messages = len(displayable)
         
         if self._SCROLL_DEBUG:
@@ -3872,11 +4609,40 @@ class ConversationPane(QWidget):
             # Only scroll if user was following
             if saved_should_follow:
                 self.conversation_display._schedule_scroll()
-            
+            elif saved_scroll_max > 0:
+                # Restore approximate scroll position for users reading history
+                QTimer.singleShot(16, lambda sv=saved_scroll_value, sm=saved_scroll_max: self._restore_scroll_position(sv, sm))
+
             if self._SCROLL_DEBUG:
                 action = "will scroll" if saved_should_follow else "NO scroll (user scrolled away)"
                 print(f"[SCROLL] Rebuild complete: {action}")
     
+    def _restore_scroll_position(self, saved_value, saved_max, retries=3):
+        """Restore scroll position after rebuild with retry.
+
+        Uses absolute position when possible (content above didn't change),
+        falls back to proportional positioning.
+        """
+        sb = self.conversation_display.verticalScrollBar()
+        if sb.maximum() <= 0:
+            if retries > 0:
+                QTimer.singleShot(32, lambda: self._restore_scroll_position(saved_value, saved_max, retries - 1))
+            return
+
+        # Try absolute restore first (works when content above scroll position is unchanged)
+        # Fall back to proportional if the content shifted significantly
+        if sb.maximum() >= saved_value:
+            target = saved_value
+        elif saved_max > 0:
+            ratio = saved_value / saved_max
+            target = int(ratio * sb.maximum())
+        else:
+            return
+
+        self.conversation_display._programmatic_scroll = True
+        sb.setValue(target)
+        self.conversation_display._programmatic_scroll = False
+
     def _extract_text_content(self, content):
         """Extract text from content (handles structured content with images)."""
         if isinstance(content, list):
@@ -3924,14 +4690,57 @@ class ConversationPane(QWidget):
     
     # Keep _build_html_content for HTML export functionality
     def _build_html_content_for_export(self):
-        """Build HTML content for conversation (returns string, doesn't set it)"""
-        
-        # Create HTML for conversation with styling that Qt actually supports
-        # The original approach uses <style> block + classes - this works in Qt
-        html = "<style>"
-        html += f"body {{ font-family: 'Iosevka Term', 'Consolas', 'Monaco', monospace; font-size: 10pt; line-height: 1.4; margin: 0; padding: 0; }}"
-        # Message blocks - use both margin-top and margin-bottom for reliable spacing in Qt
-        html += f".message {{ margin: 12px 4px; padding: 10px 12px; border-radius: 0px; background-color: {COLORS['bg_medium']}; }}"
+        """Build HTML content for conversation as a standalone HTML document."""
+
+        # Build a full standalone HTML document for export
+        html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Liminal Backrooms - Conversation Export</title>
+<style>
+"""
+        # Add Google Fonts for better typography
+        html += """
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700&display=swap');
+"""
+        html += f"""
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background-color: {COLORS['bg_dark']};
+    color: {COLORS['text_normal']};
+    padding: 0;
+    margin: 0;
+}}
+.export-header {{
+    background: linear-gradient(135deg, {COLORS['bg_dark']} 0%, {COLORS['bg_medium']} 100%);
+    border-bottom: 2px solid {COLORS['border_glow']};
+    padding: 30px 40px;
+    text-align: center;
+}}
+.export-header h1 {{
+    font-family: 'Orbitron', sans-serif;
+    color: {COLORS['accent_cyan']};
+    font-size: 24px;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+    text-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+}}
+.export-header .meta {{
+    color: {COLORS['text_dim']};
+    font-size: 12px;
+}}
+.conversation-container {{
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px 40px;
+}}
+"""
+        html += f".message {{ margin: 16px 0; padding: 14px 16px; border-radius: 0px; background-color: {COLORS['bg_medium']}; }}"
         html += f".user {{ border-right: 3px solid {COLORS['human']}; }}"
         html += f".ai-1 {{ border-left: 3px solid {COLORS['ai_1']}; }}"
         html += f".ai-2 {{ border-left: 3px solid {COLORS['ai_2']}; }}"
@@ -3952,21 +4761,32 @@ class ConversationPane(QWidget):
         html += f".rabbithole {{ color: {COLORS['accent_green']}; }}"
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
         # Notification styles - error (pink), success (green), info (yellow)
-        html += f".notify-error {{ background-color: #1a1a2a; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
-        html += f".notify-success {{ background-color: #1a2a1a; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
-        html += f".notify-info {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".notify-error {{ background-color: #1A0000; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
+        html += f".notify-success {{ background-color: #001A00; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
+        html += f".notify-info {{ background-color: #1A1A00; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Legacy agent-notification class (defaults to info style)
-        html += f".agent-notification {{ background-color: #2a2a1a; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".agent-notification {{ background-color: #1A1A00; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Code block styling - indented, visually distinct, contained within message
-        html += f"pre {{ background-color: #0F1419; border: 1px solid #2D3748; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
+        html += f"pre {{ background-color: #001100; border: 1px solid #0D3B0D; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
         html += f"code {{ font-family: 'Consolas', 'Monaco', 'Courier New', monospace; color: {COLORS['text_bright']}; font-size: 13px; line-height: 1.5; }}"
         # Inline code (not in pre block) - subtle background
-        html += f".inline-code {{ background-color: #0F1419; color: #22D3EE; border: 1px solid #2D3748; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
+        html += f".inline-code {{ background-color: #001100; color: #00FF41; border: 1px solid #0D3B0D; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
         # Typing indicator styles
         html += f".typing-indicator {{ background-color: {COLORS['bg_medium']}; padding: 10px 12px; border-radius: 0px; margin: 12px 4px; }}"
         html += f".typing-dots {{ color: {COLORS['text_dim']}; font-style: italic; }}"
-        html += "</style>"
-        
+        html += """
+</style>
+</head>
+<body>
+<div class="export-header">
+    <h1>LIMINAL BACKROOMS</h1>
+    <div class="meta">"""
+        html += f"Exported {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {sum(1 for m in self.conversation if m.get('role') == 'assistant')} AI turns"
+        html += """</div>
+</div>
+<div class="conversation-container">
+"""
+
         for i, message in enumerate(self.conversation):
             role = message.get("role", "")
             content = message.get("content", "")
@@ -4104,11 +4924,14 @@ class ConversationPane(QWidget):
                 ai_num = max(1, min(5, ai_num))
                 
                 display_name = ai_name
+                model_badge = ''
                 if model:
                     display_name += f" ({model})"
-                    
+                    # Create a model badge
+                    model_badge = f' <span style="background-color: {COLORS["bg_dark"]}; color: {COLORS["text_dim"]}; font-size: 10px; padding: 2px 6px; border: 1px solid {COLORS["border"]}; margin-left: 8px;">{model}</span>'
+
                 html += f'<div class="message ai-{ai_num}">'
-                html += f'<div class="header header-ai-{ai_num}">{display_name}</div>'
+                html += f'<div class="header header-ai-{ai_num}">{ai_name}{model_badge}</div>'
                 if image_html:
                     html += image_html
                 if processed_content:
@@ -4120,7 +4943,12 @@ class ConversationPane(QWidget):
                 html += f'<div class="content">{processed_content}</div>'
                 html += f'</div>'
         
-        # Return HTML string - caller will use setHtmlWithScrollLock
+        # Close the HTML document structure
+        html += """
+</div>
+</body>
+</html>
+"""
         return html
     
     def process_content_with_code_blocks(self, content):
@@ -4165,8 +4993,8 @@ class ConversationPane(QWidget):
                 lang_header = ''
                 if language:
                     lang_header = (
-                        f'<div style="background-color: #1A1F26; padding: 6px 12px; '
-                        f'border-bottom: 1px solid #2D3748;">'
+                        f'<div style="background-color: #002200; padding: 6px 12px; '
+                        f'border-bottom: 1px solid #0D3B0D;">'
                         f'<span style="color: #64748B; font-size: 11px; '
                         f'font-family: Consolas, Monaco, monospace; font-weight: bold; '
                         f'text-transform: uppercase;">{escape(language)}</span></div>'
@@ -4174,13 +5002,13 @@ class ConversationPane(QWidget):
                 
                 # Build code block - simple, no syntax highlighting to avoid regex issues
                 result.append(
-                    f'<div style="background-color: #0F1419; border: 1px solid #2D3748; '
+                    f'<div style="background-color: #001100; border: 1px solid #0D3B0D; '
                     f'border-radius: 4px; margin: 12px 0 12px 10px; overflow: hidden;">'
                     f'{lang_header}'
                     f'<pre style="margin: 0; padding: 12px 14px; background: transparent; '
                     f'font-family: Consolas, Monaco, monospace; font-size: 13px; '
                     f'line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; '
-                    f'color: #E2E8F0;">{escaped_code}</pre></div>'
+                    f'color: #E0E0E0;">{escaped_code}</pre></div>'
                 )
             else:
                 # Regular text - escape and process
@@ -4193,7 +5021,7 @@ class ConversationPane(QWidget):
                 # Process inline code
                 text_part = re.sub(
                     r'`([^`\n]+)`',
-                    r'<code style="background-color: #0F1419; color: #22D3EE; padding: 2px 6px; '
+                    r'<code style="background-color: #001100; color: #00FF41; padding: 2px 6px; '
                     r'border-radius: 3px; font-family: Consolas, Monaco, monospace; font-size: 12px;">\1</code>',
                     text_part
                 )
@@ -4614,21 +5442,21 @@ class CentralContainer(QWidget):
         
         gradient = QRadialGradient(center_x, center_y, max(self.width(), self.height()) * 0.9)
         
-        # More visible atmospheric colors with cyan tint
+        # More visible atmospheric colors with green tint
         pulse = 0.5 + 0.5 * math.sin(math.radians(self.bg_offset * 2))
-        center_r = int(10 + 8 * pulse)
-        center_g = int(15 + 10 * pulse)
-        center_b = int(30 + 15 * pulse)
+        center_r = int(0 + 5 * pulse)
+        center_g = int(15 + 20 * pulse)
+        center_b = int(0 + 5 * pulse)
         
         gradient.setColorAt(0, QColor(center_r, center_g, center_b))
-        gradient.setColorAt(0.4, QColor(10, 14, 26))
-        gradient.setColorAt(1, QColor(6, 8, 14))
+        gradient.setColorAt(0.4, QColor(2, 12, 4))
+        gradient.setColorAt(1, QColor(1, 6, 2))
         
         painter.fillRect(self.rect(), gradient)
         
         # Add subtle glow lines at edges
         glow_alpha = int(15 + 10 * pulse)
-        glow_color = QColor(6, 182, 212, glow_alpha)  # Cyan glow
+        glow_color = QColor(0, 255, 65, glow_alpha)  # Green glow
         painter.setPen(QPen(glow_color, 2))
         
         # Top edge glow
@@ -4719,13 +5547,18 @@ class LiminalBackroomsApp(QMainWindow):
         self.session_videos = []  # Track videos generated this session
         self.branch_conversations = {}  # Store branch conversations by ID
         self.active_branch = None      # Currently displayed branch
+        self.effective_turn_delay = TURN_DELAY  # Speed-adjusted delay between turns
         
         # Set up the UI
         self.setup_ui()
         
         # Connect signals and slots
         self.connect_signals()
-        
+
+        # Keyboard shortcuts
+        self._stop_requested = False
+        self.setup_shortcuts()
+
         # Dark theme
         self.apply_dark_theme()
         
@@ -4829,7 +5662,81 @@ class LiminalBackroomsApp(QMainWindow):
         
         # Add signal indicator to status bar
         self.statusBar().addPermanentWidget(self.signal_indicator)
-        
+
+        # ═══ SPEED CONTROLS ═══
+        speed_container = QWidget()
+        speed_container.setStyleSheet("background-color: transparent;")
+        speed_layout = QHBoxLayout(speed_container)
+        speed_layout.setContentsMargins(4, 0, 4, 0)
+        speed_layout.setSpacing(2)
+
+        speed_label = QLabel("SPEED:")
+        speed_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                padding: 0px 2px;
+                background-color: transparent;
+            }}
+        """)
+        speed_layout.addWidget(speed_label)
+
+        speed_btn_unchecked_style = f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+                padding: 1px 6px;
+                font-size: 10px;
+                border-radius: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_normal']};
+            }}
+        """
+        speed_btn_checked_style = f"""
+            QPushButton {{
+                background-color: {COLORS['bg_light']};
+                color: {COLORS['text_bright']};
+                border: 1px solid {COLORS['accent_cyan']};
+                padding: 1px 6px;
+                font-size: 10px;
+                border-radius: 0px;
+            }}
+        """
+
+        self.speed_buttons = []
+        for speed_text in ["0.5x", "1x", "2x", "5x"]:
+            btn = QPushButton(speed_text)
+            btn.setCheckable(True)
+            btn.setStyleSheet(speed_btn_unchecked_style)
+            btn.setFixedHeight(18)
+            btn.clicked.connect(self._on_speed_changed)
+            speed_layout.addWidget(btn)
+            self.speed_buttons.append(btn)
+
+        # Store styles for toggling
+        self._speed_btn_unchecked_style = speed_btn_unchecked_style
+        self._speed_btn_checked_style = speed_btn_checked_style
+
+        # Default: 1x is checked
+        self.speed_buttons[1].setChecked(True)
+        self.speed_buttons[1].setStyleSheet(speed_btn_checked_style)
+
+        self.statusBar().addPermanentWidget(speed_container)
+
+        # ═══ ZOOM INDICATOR ═══
+        self.zoom_label = QLabel("ZOOM:100%")
+        self.zoom_label.setStyleSheet(f"""
+            color: {COLORS['text_dim']};
+            font-family: {FONTS['family_mono']};
+            font-size: 9px;
+            padding: 0 6px;
+            background: transparent;
+        """)
+        self.statusBar().addPermanentWidget(self.zoom_label)
+
         # ═══ CRT TOGGLE CHECKBOX ═══
         self.crt_checkbox = QCheckBox("CRT")
         self.crt_checkbox.setStyleSheet(f"""
@@ -4857,11 +5764,38 @@ class LiminalBackroomsApp(QMainWindow):
         # Set up input callback
         self.left_pane.set_input_callback(self.handle_user_input)
     
+    def _on_speed_changed(self):
+        """Handle speed button toggle - enforce exclusive selection and update delay"""
+        sender = self.sender()
+        speed_map = {"0.5x": 2.0, "1x": 1.0, "2x": 0.5, "5x": 0.2}
+
+        # Enforce radio-button behavior: uncheck all others, ensure sender is checked
+        for btn in self.speed_buttons:
+            if btn is sender:
+                btn.setChecked(True)
+                btn.setStyleSheet(self._speed_btn_checked_style)
+            else:
+                btn.setChecked(False)
+                btn.setStyleSheet(self._speed_btn_unchecked_style)
+
+        # Calculate effective delay
+        multiplier = speed_map.get(sender.text(), 1.0)
+        self.effective_turn_delay = TURN_DELAY * multiplier
+
+        # Brief status bar message
+        self.statusBar().showMessage(
+            f"Speed set to {sender.text()} (delay: {self.effective_turn_delay:.1f}s)", 3000
+        )
+
     def toggle_crt_effect(self, enabled):
         """Toggle the CRT scanline effect"""
         if hasattr(self, 'central_container'):
             self.central_container.set_scanlines_enabled(enabled)
-    
+
+    def _update_zoom_label(self, level):
+        """Update zoom indicator in status bar."""
+        self.zoom_label.setText(f"ZOOM:{level}%")
+
     def update_iteration(self, current: int, total: int, ai_name: str = ""):
         """
         Update the iteration counter in status bar.
@@ -4913,6 +5847,58 @@ class LiminalBackroomsApp(QMainWindow):
         # Connect mode selector to update info label
         self.right_sidebar.control_panel.mode_selector.currentTextChanged.connect(self.on_mode_changed)
     
+    def setup_shortcuts(self):
+        """Set up keyboard shortcuts for the application"""
+        # Ctrl+Enter - Propagate (same as clicking PROPAGATE button)
+        shortcut_propagate = QShortcut(QKeySequence("Ctrl+Return"), self)
+        shortcut_propagate.activated.connect(self.left_pane.handle_propagate_click)
+
+        # Ctrl+E - Export conversation
+        shortcut_export = QShortcut(QKeySequence("Ctrl+E"), self)
+        shortcut_export.activated.connect(self.export_conversation)
+
+        # Ctrl+Shift+N - Reset conversation
+        shortcut_reset = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
+        shortcut_reset.activated.connect(self.left_pane.handle_reset_click)
+
+        # Ctrl+F - Toggle conversation search
+        shortcut_focus = QShortcut(QKeySequence("Ctrl+F"), self)
+        shortcut_focus.activated.connect(self.left_pane.toggle_search)
+
+        # Escape - Stop/cancel current operation
+        shortcut_stop = QShortcut(QKeySequence("Escape"), self)
+        shortcut_stop.activated.connect(self.request_stop)
+
+        # F11 - Toggle fullscreen
+        shortcut_fullscreen = QShortcut(QKeySequence("F11"), self)
+        shortcut_fullscreen.activated.connect(self.toggle_fullscreen)
+
+        # Ctrl+T - Toggle CRT effect
+        shortcut_crt = QShortcut(QKeySequence("Ctrl+T"), self)
+        shortcut_crt.activated.connect(lambda: self.crt_checkbox.setChecked(not self.crt_checkbox.isChecked()))
+
+        # Ctrl+= / Ctrl+- for zoom
+        shortcut_zoom_in = QShortcut(QKeySequence("Ctrl+="), self)
+        shortcut_zoom_in.activated.connect(self.left_pane.conversation_display.zoom_in)
+
+        shortcut_zoom_out = QShortcut(QKeySequence("Ctrl+-"), self)
+        shortcut_zoom_out.activated.connect(self.left_pane.conversation_display.zoom_out)
+
+        shortcut_zoom_reset = QShortcut(QKeySequence("Ctrl+0"), self)
+        shortcut_zoom_reset.activated.connect(self.left_pane.conversation_display.zoom_reset)
+
+    def request_stop(self):
+        """Request stop of the current operation"""
+        self._stop_requested = True
+        self.notification_label.setText("Stop requested...")
+
+    def toggle_fullscreen(self):
+        """Toggle between fullscreen and normal window mode"""
+        if self.isFullScreen():
+            self.showMaximized()
+        else:
+            self.showFullScreen()
+
     def on_mode_changed(self, mode):
         """Update the info label when conversation mode changes"""
         if mode == "Human-AI":

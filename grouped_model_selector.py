@@ -55,7 +55,7 @@ class GroupedItemDelegate(QStyledItemDelegate):
         self.accent_cyan = get_color('accent_cyan')
         
         # Current selection (the actual selected item in combobox)
-        self.current_bg = QColor("#164E63")
+        self.current_bg = QColor(self.bg_light)
         
         # Hover color - subtle highlight  
         self.hover_bg = get_color('bg_light')

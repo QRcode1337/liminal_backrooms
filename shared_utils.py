@@ -52,7 +52,7 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callb
     # Ensure we have a system prompt
     payload = {
         "model": model_id,
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "temperature": temperature,
         "stream": stream_callback is not None  # Enable streaming if callback provided
     }
@@ -183,7 +183,7 @@ def call_llama_api(prompt, conversation_history, model, system_prompt):
             input={
                 "prompt": formatted_history,
                 "system_prompt": system_prompt,
-                "max_tokens": 3000,
+                "max_tokens": 4000,
                 "temperature": 1.1,
                 "top_p": 0.99,
                 "repetition_penalty": 1.0
@@ -367,7 +367,7 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
                 "model": openrouter_model,
                 "messages": msgs,
                 "temperature": temperature,  # Use AI's custom temperature
-                "max_tokens": 4000,
+                "max_tokens": 8000,
                 "stream": stream_callback is not None
             }
             

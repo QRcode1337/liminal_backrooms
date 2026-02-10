@@ -10,62 +10,62 @@ Usage:
 """
 
 # =============================================================================
-# COLOR PALETTE - Cyberpunk Theme
+# COLOR PALETTE - Phosphor Green CRT Terminal Theme
 # =============================================================================
 
 COLORS = {
-    # Backgrounds - darker, moodier
-    'bg_dark': '#0A0E1A',           # Deep blue-black
-    'bg_medium': '#111827',         # Slate dark
-    'bg_light': '#1E293B',          # Lighter slate
-    
-    # Primary accents - neon but muted
-    'accent_cyan': '#06B6D4',       # Cyan (primary)
-    'accent_cyan_hover': '#0891B2',
-    'accent_cyan_active': '#0E7490',
-    
-    # Secondary accents
-    'accent_pink': '#EC4899',       # Hot pink (secondary)
-    'accent_purple': '#A855F7',     # Purple (tertiary)
-    'accent_yellow': '#FBBF24',     # Amber for warnings
-    'accent_green': '#10B981',      # Emerald (rabbithole)
-    
-    # AI-specific colors (for chat message headers)
-    'ai_1': '#6FFFE6',              # Bright Aqua - AI-1
-    'ai_2': '#06E2D4',              # Teal - AI-2
-    'ai_3': '#54F5E9',              # Turquoise - AI-3
-    'ai_4': '#8BFCEF',              # Light Cyan - AI-4
-    'ai_5': '#91FCFD',              # Pale Cyan - AI-5
-    'human': '#ff00b3',             # Hot Pink/Magenta - Human User
-    
+    # Backgrounds - true black to very dark green-black
+    'bg_dark': '#000000',           # Pure black (CRT off-pixel)
+    'bg_medium': '#0A1A0A',         # Very dark green-black (message blocks)
+    'bg_light': '#142814',          # Slightly lighter green-black (hover/selection)
+
+    # Primary accents - phosphor green spectrum
+    'accent_cyan': '#00FF41',       # Bright phosphor green (primary accent)
+    'accent_cyan_hover': '#00CC33', # Medium phosphor green (hover)
+    'accent_cyan_active': '#009926',# Darker phosphor green (pressed)
+
+    # Secondary accents - functional differentiation
+    'accent_pink': '#FF3333',       # Red (danger, errors, human-related)
+    'accent_purple': '#00AA22',     # Deep green (tertiary, export buttons)
+    'accent_yellow': '#CCFF00',     # Yellow-green (warnings)
+    'accent_green': '#00FF41',      # Same as primary (rabbithole)
+
+    # AI-specific colors (for chat message headers/borders - green spectrum)
+    'ai_1': '#00FF41',              # Bright phosphor green - AI-1
+    'ai_2': '#33FF66',              # Lighter green - AI-2
+    'ai_3': '#66FFAA',              # Mint green - AI-3
+    'ai_4': '#99FFCC',              # Pale green - AI-4
+    'ai_5': '#CCFFEE',              # Near-white green - AI-5
+    'human': '#FF6600',             # Amber/orange - Human User (stands out from green)
+
     # Notification colors
-    'notify_error': '#ff4444',      # Bright Red - Error/Failure notifications (distinct from human pink)
-    'notify_success': '#5DFF44',    # Bright Green - Success notifications
-    'notify_info': '#FFFF48',       # Yellow - Informational notifications
-    
-    # Text colors
-    'text_normal': '#CBD5E1',       # Slate-200
-    'text_dim': '#64748B',          # Slate-500
-    'text_bright': '#F1F5F9',       # Slate-50
-    'text_glow': '#38BDF8',         # Sky-400 (glowing text)
-    'text_timestamp': '#7a8899',    # Subtle timestamp color - readable but not distracting
-    'text_error': '#ff4444',        # Red - Error text (matches notify_error)
-    
+    'notify_error': '#FF3333',      # Red - Error/Failure
+    'notify_success': '#00FF41',    # Phosphor green - Success
+    'notify_info': '#CCFF00',       # Yellow-green - Informational
+
+    # Text colors - WHITE for message body, green for UI chrome
+    'text_normal': '#E0E0E0',       # White/light gray - message body text (readability)
+    'text_dim': '#1A6B1A',          # Dim green - timestamps, secondary labels
+    'text_bright': '#F0F0F0',       # Near-white - emphasis text
+    'text_glow': '#00FF41',         # Phosphor green - headers, glowing elements
+    'text_timestamp': '#1A6B1A',    # Dim green - same as text_dim
+    'text_error': '#FF3333',        # Red - Error text
+
     # Borders and effects
-    'border': '#1E293B',            # Slate-800
-    'border_glow': '#06B6D4',       # Glowing cyan borders
-    'border_highlight': '#334155',  # Slate-700
-    'shadow': 'rgba(6, 182, 212, 0.2)',  # Cyan glow shadows
-    
+    'border': '#0D3B0D',            # Very dark green
+    'border_glow': '#00FF41',       # Bright phosphor green borders
+    'border_highlight': '#1A6B1A',  # Medium green borders
+    'shadow': 'rgba(0, 255, 65, 0.2)',  # Green glow shadows
+
     # Legacy color mappings for compatibility
-    'accent_blue': '#06B6D4',       # Map old blue to cyan
-    'accent_blue_hover': '#0891B2',
-    'accent_blue_active': '#0E7490',
-    'accent_orange': '#F59E0B',     # Amber-500
-    'chain_of_thought': '#10B981',  # Emerald
-    'user_header': '#06B6D4',       # Cyan
-    'ai_header': '#A855F7',         # Purple
-    'system_message': '#F59E0B',    # Amber
+    'accent_blue': '#00FF41',       # Map old blue to phosphor green
+    'accent_blue_hover': '#00CC33',
+    'accent_blue_active': '#009926',
+    'accent_orange': '#CCFF00',     # Yellow-green
+    'chain_of_thought': '#00AA22',  # Deep green
+    'user_header': '#00FF41',       # Phosphor green
+    'ai_header': '#33FF66',         # Lighter green
+    'system_message': '#CCFF00',    # Yellow-green
 }
 
 
@@ -74,10 +74,10 @@ COLORS = {
 # =============================================================================
 
 FONTS = {
-    # Primary fonts
-    'family_mono': "'Iosevka Term', 'Consolas', 'Monaco', monospace",
-    'family_display': "'Orbitron', sans-serif",
-    'family_ui': "'Segoe UI', sans-serif",
+    # All monospace - full terminal feel
+    'family_mono': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
+    'family_display': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
+    'family_ui': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
     
     # Font sizes
     'size_xs': '8px',
@@ -97,7 +97,7 @@ FONTS = {
 # =============================================================================
 
 def get_combobox_style():
-    """Get the style for comboboxes - cyberpunk themed."""
+    """Get the style for comboboxes - phosphor green CRT themed."""
     return f"""
         QComboBox {{
             background-color: {COLORS['bg_medium']};
@@ -138,7 +138,7 @@ def get_combobox_style():
             padding-left: 8px;
         }}
         QComboBox QAbstractItemView::item:selected {{
-            background-color: #164E63;
+            background-color: {COLORS['bg_light']};
             color: {COLORS['text_bright']};
         }}
         QComboBox QAbstractItemView::item:hover {{
@@ -182,7 +182,7 @@ def get_button_style(accent_color=None):
 
 
 def get_input_style():
-    """Get style for text inputs - cyberpunk themed."""
+    """Get style for text inputs - phosphor green CRT themed."""
     return f"""
         QLineEdit, QTextEdit {{
             background-color: {COLORS['bg_medium']};
@@ -238,7 +238,7 @@ def get_label_style(style_type='normal'):
 
 
 def get_checkbox_style():
-    """Get style for checkboxes - cyberpunk themed."""
+    """Get style for checkboxes - phosphor green CRT themed."""
     return f"""
         QCheckBox {{
             color: {COLORS['text_dim']};
@@ -265,7 +265,7 @@ def get_checkbox_style():
 
 def get_scrollbar_style():
     """
-    Get style for scrollbars - retro CRT/cyberpunk theme.
+    Get style for scrollbars - retro CRT/phosphor green CRT theme.
     
     Features:
     - No rounded corners (sharp edges for retro look)

@@ -160,6 +160,7 @@ cython_debug/
 #.idea/
 
 # Project specific
+shitpostbench_reports/*
 images/*
 !images/.gitkeep
 exports/*
@@ -175,6 +176,8 @@ videos/*
 models_cache.json
 .claude/
 settings/splitter_state.json
+shitpostbench.py
+
 
 # BackroomsBench evaluation reports (generated outputs, except leaderboard)
 backroomsbench_reports/*
@@ -182,9 +185,10 @@ backroomsbench_reports/*
 !backroomsbench_reports/LEADERBOARD.md
 !backroomsbench_reports/leaderboard.json
 
-# Output conversation files (timestamped)
+# Output conversation files (timestamped) and autosave
 outputs/conversation_*.html
 outputs/conversation_full.html
+outputs/.autosave_conversation.json
 
 # Keep the outputs folder structure
 !outputs/.gitkeep
