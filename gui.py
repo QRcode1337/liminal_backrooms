@@ -512,8 +512,9 @@ class MessageWidget(QFrame):
                 border-radius: 0px;
             }}
         """)
-        
-        header = self._create_header_widget("Human User", self.HUMAN_COLOR)
+
+        display_name = self.message_data.get('_user_name', 'Human User')
+        header = self._create_header_widget(display_name, self.HUMAN_COLOR)
         self.layout().addWidget(header)
         
         # Format code blocks and use RichText
@@ -3456,7 +3457,35 @@ class ControlPanel(QWidget):
         self.mode_selector.addItems(["AI-AI", "Human-AI"])
         self.mode_selector.setStyleSheet(get_combobox_style())
         mode_layout.addWidget(self.mode_selector)
-        
+
+        # Username input
+        username_container = QWidget()
+        username_layout = QVBoxLayout(username_container)
+        username_layout.setContentsMargins(0, 0, 0, 0)
+        username_layout.setSpacing(5)
+
+        username_label = self._ascii_section_header("YOUR NAME")
+        username_layout.addWidget(username_label)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Human User")
+        self.username_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 0px;
+                padding: 6px 8px;
+                font-family: {FONTS['family_mono']};
+                font-size: 11px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {COLORS['accent_cyan']};
+            }}
+        """)
+        self.username_input.setToolTip("Your display name — shown in chat and sent to AI models")
+        username_layout.addWidget(self.username_input)
+
         # Iterations with slider
         iterations_container = QWidget()
         iterations_layout = QVBoxLayout(iterations_container)
@@ -3469,7 +3498,41 @@ class ControlPanel(QWidget):
         self.iterations_selector = RetroSlider(values=[1, 2, 4, 6, 12, 100])
         self.iterations_selector.set_value(1)
         iterations_layout.addWidget(self.iterations_selector)
-        
+
+        # Step Mode toggle - single AI turn per propagate click
+        step_mode_container = QWidget()
+        step_mode_layout = QVBoxLayout(step_mode_container)
+        step_mode_layout.setContentsMargins(0, 0, 0, 0)
+        step_mode_layout.setSpacing(5)
+
+        step_mode_label = self._ascii_section_header("STEP MODE")
+        step_mode_layout.addWidget(step_mode_label)
+
+        self.step_mode_checkbox = QCheckBox("Single AI turn per click")
+        self.step_mode_checkbox.setStyleSheet(get_checkbox_style())
+        self.step_mode_checkbox.setToolTip("When enabled, each Propagate click advances one AI turn instead of a full round. Lets you interject between AI turns.")
+        self.step_mode_checkbox.stateChanged.connect(self._on_step_mode_changed)
+        step_mode_layout.addWidget(self.step_mode_checkbox)
+
+        # Next Turn selector - pick which AI goes next (only visible in step mode)
+        self.next_turn_container = QWidget()
+        next_turn_layout = QHBoxLayout(self.next_turn_container)
+        next_turn_layout.setContentsMargins(0, 0, 0, 0)
+        next_turn_layout.setSpacing(5)
+
+        next_turn_label = QLabel("Next:")
+        next_turn_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
+        next_turn_layout.addWidget(next_turn_label)
+
+        self.next_turn_selector = NoScrollComboBox()
+        self.next_turn_selector.addItems(["Auto", "AI-1", "AI-2", "AI-3", "AI-4", "AI-5"])
+        self.next_turn_selector.setStyleSheet(get_combobox_style())
+        self.next_turn_selector.setToolTip("Auto follows normal sequence. Pick an AI to override which one speaks next.")
+        next_turn_layout.addWidget(self.next_turn_selector, 1)
+
+        step_mode_layout.addWidget(self.next_turn_container)
+        self.next_turn_container.setVisible(False)  # Hidden until step mode enabled
+
         # Number of AIs selection
         num_ais_container = QWidget()
         num_ais_layout = QVBoxLayout(num_ais_container)
@@ -3651,7 +3714,9 @@ class ControlPanel(QWidget):
         
         # Add all controls directly to controls_layout (now vertical)
         controls_layout.addWidget(mode_container)
+        controls_layout.addWidget(username_container)
         controls_layout.addWidget(iterations_container)
+        controls_layout.addWidget(step_mode_container)
         controls_layout.addWidget(num_ais_container)
         controls_layout.addWidget(invite_tier_container)
         
@@ -3768,6 +3833,22 @@ class ControlPanel(QWidget):
         else:
             return "Both"
     
+    def _on_step_mode_changed(self, state):
+        """Show/hide the next turn selector when step mode is toggled."""
+        enabled = state == 2  # Qt.CheckState.Checked
+        self.next_turn_container.setVisible(enabled)
+        if not enabled:
+            self.next_turn_selector.setCurrentText("Auto")
+
+    def is_step_mode(self):
+        """Return whether step mode is currently enabled."""
+        return self.step_mode_checkbox.isChecked()
+
+    def get_username(self):
+        """Return the user's display name, defaulting to 'Human User'."""
+        name = self.username_input.text().strip()
+        return name if name else "Human User"
+
     def initialize_selectors(self):
         """Initialize the selector dropdowns with values from config"""
         # AI model selectors are GroupedModelComboBox instances that self-populate
@@ -4907,7 +4988,8 @@ body {{
             if role == 'user':
                 # User message
                 html += f'<div class="message user">'
-                html += f'<div class="header header-human">Human User</div>'
+                user_display = message.get('_user_name', 'Human User')
+                html += f'<div class="header header-human">{user_display}</div>'
                 if image_html:
                     html += image_html
                 if processed_content:
