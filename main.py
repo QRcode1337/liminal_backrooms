@@ -37,6 +37,7 @@ from shared_utils import (
     call_openai_api,
     call_replicate_api,
     call_deepseek_api,
+    call_direct_provider_api,
     open_html_in_browser,
     generate_image_from_text,
     generate_video_with_sora
@@ -574,170 +575,125 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                     "ai_name": ai_name
                 }
 
-        # Route Claude models through OpenRouter instead of direct Anthropic API
-        # This avoids issues with image handling differences between the APIs
-        # Set to False to use OpenRouter for Claude (recommended for image support)
-        USE_DIRECT_ANTHROPIC_API = False
-        
-        if USE_DIRECT_ANTHROPIC_API and ("claude" in model_id.lower() or model_id in ["anthropic/claude-3-opus-20240229", "anthropic/claude-3-sonnet-20240229", "anthropic/claude-3-haiku-20240307"]):
-            print(f"Using Claude API for model: {model_id}")
-            
-            # CRITICAL: Make sure there are no duplicates in the messages and system prompt is included
-            final_messages = []
-            seen_contents = set()
-            
-            for msg in messages:
-                # Skip empty messages - handle both string and list content
-                content = msg.get("content", "")
-                is_empty = False
-                if isinstance(content, list):
-                    # For structured content, check if all parts are empty
-                    text_parts = [part.get('text', '').strip() for part in content if part.get('type') == 'text']
-                    has_image = any(part.get('type') == 'image' for part in content)
-                    is_empty = not text_parts and not has_image
-                elif isinstance(content, str):
-                    is_empty = not content
-                else:
-                    is_empty = not content
-                    
-                if is_empty:
-                    continue
-                    
-                # Handle system message separately
-                if msg.get("role") == "system":
-                    continue
-                    
-                # Check for duplicates by content - create hashable representation
-                content = msg.get("content", "")
-                
-                # Create a hashable content_hash for duplicate detection
-                if isinstance(content, list):
-                    # For structured messages, use text parts for hash
-                    text_parts = [part.get('text', '') for part in content if part.get('type') == 'text']
-                    content_hash = ''.join(text_parts)
-                elif isinstance(content, str):
-                    content_hash = content
-                else:
-                    content_hash = str(content) if content else ""
-                
-                if content_hash and content_hash in seen_contents:
-                    print(f"Skipping duplicate message in AI turn: {content_hash[:30]}...")
-                    continue
-                
-                if content_hash:
-                    seen_contents.add(content_hash)
-                final_messages.append(msg)
-            
-            # Ensure we have at least one message
-            if not final_messages:
-                print("Warning: No messages left after filtering. Adding a default message.")
-                final_messages.append({"role": "user", "content": "Connecting..."})
-            
-            # Get the prompt content safely
-            prompt_content = ""
-            if len(final_messages) > 0:
-                prompt_content = final_messages[-1].get("content", "")
-                # Use all messages except the last one as context
-                context_messages = final_messages[:-1]
-            else:
-                context_messages = []
-                prompt_content = "Connecting..."  # Default fallback
-            
-            # Call Claude API with filtered messages (with streaming if callback provided)
-            response = call_claude_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback)
-            
+        # ── Direct Provider Routing (Groq / Google / xAI / Kimi / Ollama) ──────
+        # Model IDs for direct providers use the format "provider::actual-model-id".
+        # These bypass OpenRouter and hit the provider's own OpenAI-compat endpoint.
+        if "::" in model_id:
+            provider, direct_model = model_id.split("::", 1)
+            print(f"[Direct] Routing to provider={provider} model={direct_model}")
+            prompt_content = messages[-1].get("content", "") if messages else "Connecting..."
+            context_messages = messages[:-1] if messages else []
+            response = call_direct_provider_api(
+                prompt_content,
+                context_messages,
+                provider,
+                direct_model,
+                system_prompt,
+                stream_callback=streaming_callback,
+                temperature=temperature,
+            )
             return {
                 "role": "assistant",
                 "content": response,
                 "model": model,
-                "ai_name": ai_name
+                "ai_name": ai_name,
             }
-        
-        # Check for DeepSeek models to use Replicate via DeepSeek API function
-        if "deepseek" in model.lower():
-            print(f"Using Replicate API for DeepSeek model: {model_id}")
-            
-            # Ensure we have at least one message for the prompt
-            if len(messages) > 0:
-                prompt_content = messages[-1].get("content", "")
-                context_messages = messages[:-1]
-            else:
-                prompt_content = "Connecting..."
-                context_messages = []
-                
-            response = call_deepseek_api(prompt_content, context_messages, model_id, system_prompt)
-            
-            # Ensure response has the required format for the Worker class
-            if isinstance(response, dict) and 'content' in response:
-                # Add model info to the response
-                response['model'] = model
-                response['role'] = 'assistant'
-                response['ai_name'] = ai_name
-                
-                # Check for HTML contribution
-                if "html_contribution" in response:
-                    html_contribution = response["html_contribution"]
-                    
-                    # Don't update HTML document here - we'll do it in on_ai_result_received
-                    # Just add indicator to the conversation part
-                    response["content"] += "\n\n..."
-                    if "display" in response:
-                        response["display"] += "\n\n..."
-                
+
+        # ── Smart Provider Routing ─────────────────────────────────────────────
+        # OpenRouter is ONLY used for :free models (saves your $2 balance).
+        # All paid models route directly to their provider's own API.
+        #
+        # Routing priority:
+        #   anthropic/*  → Anthropic direct  (ANTHROPIC_API_KEY)
+        #   openai/*     → OpenAI direct     (OPENAI_API_KEY)
+        #   google/gem*  → Google direct     (GOOGLE_API_KEY)
+        #   x-ai/*       → xAI direct        (XAI_API_KEY)
+        #   moonshotai/* → Kimi/Moonshot     (KIMIK2_API_KEY)
+        #   deepseek/*   → OpenRouter        (no direct key)
+        #   *:free       → OpenRouter        (free tier — your $2 account)
+        #   everything else → OpenRouter     (fallback; logged as warning)
+
+        prompt_content = messages[-1].get("content", "Connecting...") if messages else "Connecting..."
+        context_messages = messages[:-1] if messages else []
+
+        def _ok(content):
+            return {"role": "assistant", "content": content, "model": model, "ai_name": ai_name}
+
+        # Anthropic → direct
+        if model_id.startswith("anthropic/"):
+            actual = model_id.replace("anthropic/", "", 1)
+            print(f"[Anthropic Direct] {actual}")
+            return _ok(call_claude_api(
+                prompt_content, context_messages, actual,
+                system_prompt, stream_callback=streaming_callback, temperature=temperature
+            ))
+
+        # OpenAI → direct
+        if (model_id.startswith("openai/") or model_id.startswith("gpt-")
+                or model_id.startswith("o1") or model_id.startswith("o3")
+                or model_id in ("chatgpt-4o-latest",)):
+            actual = model_id.replace("openai/", "", 1)
+            print(f"[OpenAI Direct] {actual}")
+            return _ok(call_direct_provider_api(
+                prompt_content, context_messages, "openai-direct", actual,
+                system_prompt, streaming_callback, temperature
+            ))
+
+        # Google Gemini → direct
+        if model_id.startswith("google/gemini"):
+            actual = model_id.replace("google/", "", 1)
+            print(f"[Google Direct] {actual}")
+            return _ok(call_direct_provider_api(
+                prompt_content, context_messages, "google-direct", actual,
+                system_prompt, streaming_callback, temperature
+            ))
+
+        # xAI (Grok) → direct
+        if model_id.startswith("x-ai/"):
+            actual = model_id.replace("x-ai/", "", 1)
+            print(f"[xAI Direct] {actual}")
+            return _ok(call_direct_provider_api(
+                prompt_content, context_messages, "xai-direct", actual,
+                system_prompt, streaming_callback, temperature
+            ))
+
+        # Moonshot / Kimi → direct
+        if model_id.startswith("moonshotai/"):
+            actual = model_id.replace("moonshotai/", "", 1)
+            print(f"[Kimi Direct] {actual}")
+            return _ok(call_direct_provider_api(
+                prompt_content, context_messages, "kimi-direct", actual,
+                system_prompt, streaming_callback, temperature
+            ))
+
+        # FREE models → OpenRouter (this is what the $2 is for)
+        if model_id.endswith(":free"):
+            print(f"[OpenRouter Free] {model_id}")
+            response = call_openrouter_api(
+                prompt_content, context_messages, model_id,
+                system_prompt, stream_callback=streaming_callback, temperature=temperature
+            )
+            return _ok(response)
+
+        # DeepSeek → OpenRouter (no direct DeepSeek key; uses deepseek-specific parser)
+        if "deepseek" in model_id.lower():
+            print(f"[DeepSeek via OpenRouter] {model_id}")
+            response = call_deepseek_api(
+                prompt_content, context_messages, model_id, system_prompt,
+                stream_callback=streaming_callback
+            )
+            if isinstance(response, dict) and "content" in response:
+                response.update({"model": model, "role": "assistant", "ai_name": ai_name})
                 return response
-            else:
-                # Create a formatted response if not already in the right format
-                return {
-                    "role": "assistant",
-                    "content": str(response) if response else "No response from model",
-                    "model": model,
-                    "ai_name": ai_name,
-                    "display": str(response) if response else "No response from model"
-                }
-            
-        # Use OpenRouter for all other models
-        else:
-            print(f"Using OpenRouter API for model: {model_id}")
-            
-            try:
-                # Ensure we have valid messages
-                if len(messages) > 0:
-                    prompt_content = messages[-1].get("content", "")
-                    context_messages = messages[:-1]
-                else:
-                    prompt_content = "Connecting..."
-                    context_messages = []
-                
-                # Call OpenRouter API with streaming support
-                response = call_openrouter_api(prompt_content, context_messages, model_id, system_prompt, stream_callback=streaming_callback, temperature=temperature)
-                
-                # Avoid printing full response which could be large
-                response_preview = str(response)[:200] + "..." if response and len(str(response)) > 200 else response
-                print(f"Raw {model} Response: {response_preview}")
-                
-                result = {
-                    "role": "assistant",
-                    "content": response,
-                    "model": model,
-                    "ai_name": ai_name
-                }
-                
-                return result
-            except Exception as e:
-                error_message = f"Error making API request: {str(e)}"
-                print(f"Error: {error_message}")
-                print(f"Error type: {type(e)}")
-                
-                # Create an error response
-                result = {
-                    "role": "system",
-                    "content": f"Error: {error_message}",
-                    "model": model,
-                    "ai_name": ai_name
-                }
-                
-                # Return the error result
-                return result
+            return _ok(str(response) if response else "No response from model")
+
+        # Fallback → OpenRouter (Qwen, Meta, Mistral paid, unknown providers)
+        print(f"[OpenRouter Fallback] {model_id} — no direct key for this provider")
+        response = call_openrouter_api(
+            prompt_content, context_messages, model_id,
+            system_prompt, stream_callback=streaming_callback, temperature=temperature
+        )
+        return _ok(response)
             
     except Exception as e:
         error_message = f"Error making API request: {str(e)}"

@@ -3167,6 +3167,17 @@ class RightSidebar(QWidget):
         tab_layout.addWidget(self.video_button)
         tab_layout.addWidget(self.stats_button)
 
+        # Settings button
+        tab_layout.addStretch()
+        self.settings_button = QPushButton("⚙ KEYS")
+        self.settings_button.setStyleSheet(tab_style.replace(
+            "border-bottom: 2px solid transparent;",
+            "border-bottom: 2px solid transparent; border-left: 1px solid #333;"
+        ))
+        self.settings_button.setToolTip("API Keys & Provider Routing")
+        self.settings_button.clicked.connect(self._open_settings)
+        tab_layout.addWidget(self.settings_button)
+
         layout.addWidget(tab_container)
         
         # Create stacked widget for tab content
@@ -3198,6 +3209,16 @@ class RightSidebar(QWidget):
         # Connect network pane signal to forward it
         self.network_pane.nodeSelected.connect(self.nodeSelected)
     
+    def _open_settings(self):
+        """Open the API Keys & Provider Routing settings dialog."""
+        try:
+            from settings_dialog import SettingsDialog
+            dlg = SettingsDialog(self)
+            dlg.exec()
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Settings Error", str(e))
+
     def switch_tab(self, index):
         """Switch between tabs"""
         self.stack.setCurrentIndex(index)

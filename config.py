@@ -198,6 +198,56 @@ if HAS_MODEL_VALIDATOR:
 else:
     AI_MODELS = _CURATED_MODELS
 
+# ── Direct Provider Models ─────────────────────────────────────────────────────
+# These bypass OpenRouter and call provider APIs directly.
+# Model IDs use the format "provider::actual-model-id" so routing can split on "::".
+# Keys: GROQ_API_KEY, GOOGLE_API_KEY, XAI_API_KEY, KIMIK2_API_KEY, OLLAMA_API_KEY
+_DIRECT_MODELS = {
+    "Direct — Groq": {
+        "⚡ Kimi K2 Instruct (Groq)":         "groq::moonshotai/kimi-k2-instruct",
+        "⚡ Llama 4 Scout 17B (Groq)":         "groq::meta-llama/llama-4-scout-17b-16e-instruct",
+        "⚡ Llama 4 Maverick 17B (Groq)":      "groq::meta-llama/llama-4-maverick-17b-128e-instruct",
+        "⚡ Llama 3.3 70B Versatile (Groq)":   "groq::llama-3.3-70b-versatile",
+        "⚡ Llama 3.1 8B Instant (Groq)":      "groq::llama-3.1-8b-instant",
+        "⚡ DeepSeek R1 Distill 70B (Groq)":   "groq::deepseek-r1-distill-llama-70b",
+        "⚡ QwQ 32B Thinking (Groq)":          "groq::qwen-qwq-32b",
+        "⚡ Gemma 2 9B (Groq)":                "groq::gemma2-9b-it",
+        "⚡ Mistral Saba 24B (Groq)":          "groq::mistral-saba-24b",
+        "⚡ Compound Beta (Groq)":             "groq::compound-beta",
+    },
+    "Direct — Google": {
+        "🔵 Gemini 2.5 Pro (Direct)":          "google-direct::gemini-2.5-pro",
+        "🔵 Gemini 2.5 Flash (Direct)":        "google-direct::gemini-2.5-flash",
+        "🔵 Gemini 2.0 Flash (Direct)":        "google-direct::gemini-2.0-flash",
+        "🔵 Gemini 1.5 Pro (Direct)":          "google-direct::gemini-1.5-pro",
+    },
+    "Direct — xAI": {
+        "🤖 Grok 3 (Direct)":                  "xai-direct::grok-3",
+        "🤖 Grok 3 Mini (Direct)":             "xai-direct::grok-3-mini",
+        "🤖 Grok 3 Mini Fast (Direct)":        "xai-direct::grok-3-mini-fast",
+        "🤖 Grok 2 (Direct)":                  "xai-direct::grok-2-1212",
+        "🤖 Grok Beta (Direct)":               "xai-direct::grok-beta",
+    },
+    "Direct — Kimi": {
+        "🌙 Kimi K2 (Direct)":                 "kimi-direct::kimi-k2-0711-preview",
+        "🌙 Moonshot 128K (Direct)":           "kimi-direct::moonshot-v1-128k",
+        "🌙 Moonshot 32K (Direct)":            "kimi-direct::moonshot-v1-32k",
+        "🌙 Moonshot 8K (Direct)":             "kimi-direct::moonshot-v1-8k",
+    },
+    "Direct — Ollama (Local)": {
+        "🦙 Qwen 3 8B (Local)":                "ollama::qwen3:8b",
+        "🦙 Qwen 3 14B (Local)":               "ollama::qwen3:14b",
+        "🦙 Llama 3.2 3B (Local)":             "ollama::llama3.2:3b",
+        "🦙 Llama 3.3 70B (Local)":            "ollama::llama3.3:70b",
+        "🦙 DeepSeek R1 14B (Local)":          "ollama::deepseek-r1:14b",
+        "🦙 Gemma 3 12B (Local)":              "ollama::gemma3:12b",
+        "🦙 Mistral 7B (Local)":               "ollama::mistral:7b",
+    },
+}
+
+# Merge direct models into the main AI_MODELS dict under a "Direct" tier
+AI_MODELS["Direct"] = _DIRECT_MODELS
+
 # Flat lookup dict for compatibility with functions that expect simple name→id mapping
 _FLAT_AI_MODELS = {}
 for tier_models in AI_MODELS.values():

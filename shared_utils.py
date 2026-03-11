@@ -1232,3 +1232,117 @@ def web_search(query: str, max_results: int = 5) -> dict:
             "error": str(e)
         }
 
+
+
+# -------------------- Direct Provider API (OpenAI-compatible) --------------------
+
+_DIRECT_PROVIDER_CONFIGS = {
+    "openai-direct": {
+        "base_url": "https://api.openai.com/v1",
+        "key_env": "OPENAI_API_KEY",
+        "max_tokens": 8000,
+    },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_env": "GROQ_API_KEY",
+        "max_tokens": 8000,
+    },
+    "google-direct": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "key_env": "GOOGLE_API_KEY",
+        "max_tokens": 8192,
+    },
+    "xai-direct": {
+        "base_url": "https://api.x.ai/v1",
+        "key_env": "XAI_API_KEY",
+        "max_tokens": 8000,
+    },
+    "kimi-direct": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "key_env": "KIMIK2_API_KEY",
+        "max_tokens": 8192,
+    },
+    "ollama": {
+        "base_url_env": "OLLAMA_BASE_URL",
+        "base_url_default": "http://localhost:11434/v1",
+        "key_env": "OLLAMA_API_KEY",
+        "key_default": "ollama",
+        "max_tokens": 4096,
+    },
+}
+
+
+def call_direct_provider_api(
+    prompt,
+    conversation_history,
+    provider: str,
+    model: str,
+    system_prompt=None,
+    stream_callback=None,
+    temperature: float = 1.0,
+):
+    """Call any OpenAI-compatible provider directly (Groq, Google, xAI, Kimi, Ollama).
+
+    model IDs in config use the format ``provider::actual-model-id``.
+    This function receives the already-split ``provider`` and ``model`` args.
+    """
+    cfg = _DIRECT_PROVIDER_CONFIGS.get(provider)
+    if not cfg:
+        return f"Error: Unknown direct provider '{provider}'"
+
+    api_key = os.getenv(cfg["key_env"]) or cfg.get("key_default", "")
+    if not api_key:
+        return f"Error: {cfg['key_env']} not set — cannot call {provider}"
+
+    base_url = os.getenv(cfg.get("base_url_env", ""), cfg.get("base_url", ""))
+    max_tokens = cfg.get("max_tokens", 8000)
+
+    print(f"[{provider}] Calling model={model} temp={temperature}")
+
+    client = OpenAI(base_url=base_url, api_key=api_key)
+
+    # Build messages — strip structured image content for direct providers
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    for msg in conversation_history:
+        if msg.get("role") == "system":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            content = " ".join(text_parts).strip()
+        if content:
+            messages.append({"role": msg["role"], "content": content})
+
+    user_content = prompt if isinstance(prompt, str) else str(prompt)
+    messages.append({"role": "user", "content": user_content})
+
+    try:
+        if stream_callback:
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=min(temperature, 2.0),
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            full_response = ""
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    token = chunk.choices[0].delta.content
+                    full_response += token
+                    stream_callback(token)
+            return full_response
+        else:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=min(temperature, 2.0),
+                max_tokens=max_tokens,
+            )
+            return resp.choices[0].message.content or ""
+    except Exception as e:
+        print(f"[{provider}] Error: {e}")
+        return f"Error calling {provider} ({model}): {str(e)}"
