@@ -3042,6 +3042,66 @@ class VideoPreviewPane(QWidget):
             subprocess.Popen(f'explorer "{videos_dir}"')
 
 
+class MiniBarChart(QWidget):
+    """Tiny sparkline bar chart for StatsWidget visualizations."""
+
+    def __init__(self, max_bars=20, bar_width=4, bar_gap=1, chart_height=24, parent=None):
+        super().__init__(parent)
+        self.max_bars = max_bars
+        self.bar_width = bar_width
+        self.bar_gap = bar_gap
+        self.chart_height = chart_height
+        self._values = []
+        total_width = max_bars * (bar_width + bar_gap) + bar_gap
+        self.setFixedSize(total_width, chart_height + 2)
+        self.setToolTip("Sparkline chart")
+
+    def add_value(self, value: float):
+        """Append a new data point, keeping only the last max_bars values."""
+        self._values.append(value)
+        if len(self._values) > self.max_bars:
+            self._values = self._values[-self.max_bars:]
+        self.update()
+
+    def clear(self):
+        """Reset all data."""
+        self._values = []
+        self.update()
+
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QPainter, QColor, QPen
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # Background
+        painter.fillRect(self.rect(), QColor("#050A15"))
+
+        if not self._values:
+            painter.end()
+            return
+
+        max_val = max(self._values) if max(self._values) > 0 else 1
+        h = self.chart_height
+
+        # Draw bars left-to-right; newest is rightmost
+        for i, val in enumerate(self._values):
+            x = self.bar_gap + i * (self.bar_width + self.bar_gap)
+            ratio = val / max_val
+            bar_h = max(1, int(ratio * h))
+            y = h - bar_h + 1  # +1 for top padding
+
+            # Color: dim (dark green) for low bars, bright green for high bars
+            # Interpolate between #1A4A1A (dark) and #00FF41 (bright phosphor green)
+            r = int(0x1A + ratio * (0x00 - 0x1A))
+            g = int(0x4A + ratio * (0xFF - 0x4A))
+            b = int(0x1A + ratio * (0x41 - 0x1A))
+            color = QColor(r, g, b)
+
+            painter.fillRect(x, y, self.bar_width, bar_h, color)
+
+        painter.end()
+
+
 class StatsWidget(QWidget):
     """Live conversation statistics display"""
 
@@ -3117,6 +3177,41 @@ class StatsWidget(QWidget):
             self.stat_labels[key] = value_label
 
         layout.addWidget(stats_container)
+
+        # ── Sparkline section ──────────────────────────────────────────────
+        sparkline_container = QWidget()
+        sparkline_container.setStyleSheet(f"background-color: transparent;")
+        sparkline_layout = QVBoxLayout(sparkline_container)
+        sparkline_layout.setContentsMargins(8, 4, 8, 4)
+        sparkline_layout.setSpacing(4)
+
+        # Latency chart header
+        latency_header = QLabel("── RESPONSE LATENCY (ms) ──")
+        latency_header.setStyleSheet(
+            f"background-color: transparent; color: {COLORS['text_dim']}; "
+            f"font-size: 8px; font-weight: bold; letter-spacing: 1px;"
+        )
+        latency_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sparkline_layout.addWidget(latency_header)
+
+        self.latency_chart = MiniBarChart(max_bars=20, bar_width=5, bar_gap=1, chart_height=28)
+        self.latency_chart.setToolTip("Response latency per AI turn (ms)")
+        sparkline_layout.addWidget(self.latency_chart, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # Token density chart header
+        token_header = QLabel("── TOKEN DENSITY / MSG ──")
+        token_header.setStyleSheet(
+            f"background-color: transparent; color: {COLORS['text_dim']}; "
+            f"font-size: 8px; font-weight: bold; letter-spacing: 1px;"
+        )
+        token_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sparkline_layout.addWidget(token_header)
+
+        self.token_chart = MiniBarChart(max_bars=20, bar_width=5, bar_gap=1, chart_height=28)
+        self.token_chart.setToolTip("Estimated tokens per AI message")
+        sparkline_layout.addWidget(self.token_chart, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        layout.addWidget(sparkline_container)
         layout.addStretch()
 
     def update_stats(self, conversation, images_count=0, commands_count=0):
@@ -3180,11 +3275,23 @@ class StatsWidget(QWidget):
         self.stat_labels['commands'].setText(str(commands_count))
 
     def record_response_time(self, ms):
-        """Record a response time for averaging"""
+        """Record a response time for averaging and update sparkline chart."""
         self.stats['response_times'].append(ms)
         # Keep last 20 for rolling average
         if len(self.stats['response_times']) > 20:
             self.stats['response_times'] = self.stats['response_times'][-20:]
+        # Update AVG RESPONSE label immediately (no need to wait for update_stats)
+        avg = sum(self.stats['response_times']) / len(self.stats['response_times'])
+        if avg > 1000:
+            self.stat_labels['avg_response'].setText(f"{avg/1000:.1f}s")
+        else:
+            self.stat_labels['avg_response'].setText(f"{int(avg)}ms")
+        # Push new data point to latency sparkline
+        self.latency_chart.add_value(float(ms))
+
+    def add_token_density(self, est_tokens: int):
+        """Record estimated token count for a message and update sparkline chart."""
+        self.token_chart.add_value(float(est_tokens))
 
 
 class RightSidebar(QWidget):
