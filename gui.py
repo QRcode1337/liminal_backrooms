@@ -81,9 +81,11 @@ class MessageWidget(QFrame):
     HUMAN_COLOR = COLORS['human']  # Amber
     TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
     
-    def __init__(self, message_data, parent=None):
+    def __init__(self, message_data, msg_index=None, parent=None):
         super().__init__(parent)
         self.message_data = message_data
+        self.msg = message_data  # Alias for convenience
+        self.msg_index = msg_index  # Index for anchor links (#msg-N)
         self._content_label = None  # Reference to content label for updates
         self._creation_time = datetime.now()
         self._setup_ui()
@@ -705,6 +707,11 @@ class MessageWidget(QFrame):
 
         super().mouseDoubleClickEvent(event)
 
+    def contextMenuEvent(self, event):
+        """Show right-click context menu with message actions."""
+        menu = ConversationContextMenu(self, msg=self.msg, msg_index=self.msg_index)
+        menu.exec(event.globalPos())
+
     def update_content(self, new_text):
         """Update the content of this message (for streaming).
         
@@ -1183,7 +1190,8 @@ class ChatScrollArea(QScrollArea):
         
         Returns the created MessageWidget for potential updates.
         """
-        widget = MessageWidget(message_data)
+        msg_index = len(self.message_widgets)  # 0-based index before appending
+        widget = MessageWidget(message_data, msg_index=msg_index)
         
         # Simply add to end of layout (no stretch item to work around)
         self.message_layout.addWidget(widget)
@@ -1208,8 +1216,9 @@ class ChatScrollArea(QScrollArea):
             self.message_layout.removeWidget(old_widget)
             old_widget.deleteLater()
             
-            # Add new widget
-            widget = MessageWidget(message_data)
+            # Add new widget (reuse same index position)
+            msg_index = len(self.message_widgets)
+            widget = MessageWidget(message_data, msg_index=msg_index)
             self.message_layout.addWidget(widget)
             self.message_widgets.append(widget)
             
@@ -4034,55 +4043,197 @@ class ControlPanel(QWidget):
             QMessageBox.critical(self, "Error", f"Error opening HTML file:\n{e}")
 
 class ConversationContextMenu(QMenu):
-    """Context menu for the conversation display"""
+    """Context menu for the conversation display with full message actions."""
     rabbitholeSelected = pyqtSignal()
     forkSelected = pyqtSignal()
-    
-    def __init__(self, parent=None):
+
+    def __init__(self, parent=None, msg=None, msg_index=None):
         super().__init__(parent)
-        
-        # Create actions
+        self._msg = msg or {}
+        self._msg_index = msg_index
+        self._parent_widget = parent  # The MessageWidget that opened this menu
+
+        # Apply phosphor green CRT styling
+        from styles import get_menu_style
+        self.setStyleSheet(get_menu_style() + """
+            QMenu {
+                font-family: Consolas, Monaco, monospace;
+                font-size: 9pt;
+            }
+        """)
+
+        # --- Actions ---
+        copy_text_action = QAction("📋 Copy Message", self)
+        copy_text_action.triggered.connect(self._copy_plain_text)
+        self.addAction(copy_text_action)
+
+        copy_md_action = QAction("📋 Copy as Markdown", self)
+        copy_md_action.triggered.connect(self._copy_markdown)
+        self.addAction(copy_md_action)
+
+        self.addSeparator()
+
+        quote_action = QAction("💬 Quote Reply", self)
+        quote_action.triggered.connect(self._quote_reply)
+        self.addAction(quote_action)
+
+        self.addSeparator()
+
+        export_action = QAction("📤 Export Message", self)
+        export_action.triggered.connect(self._export_message)
+        self.addAction(export_action)
+
+        link_action = QAction("🔗 Copy Message Link", self)
+        link_action.triggered.connect(self._copy_message_link)
+        self.addAction(link_action)
+
+        self.addSeparator()
+
+        # Fork/Rabbithole stubs (wired to signals for future use)
         self.rabbithole_action = QAction("🕳️ Rabbithole", self)
         self.fork_action = QAction("🔱 Fork", self)
-        
-        # Add actions to menu
         # NOTE: Fork/Rabbithole temporarily disabled - needs rebuild
         # self.addAction(self.rabbithole_action)
         # self.addAction(self.fork_action)
-        
-        # Connect actions to signals
         # self.rabbithole_action.triggered.connect(self.on_rabbithole_selected)
         # self.fork_action.triggered.connect(self.on_fork_selected)
-        
-        # Apply styling
-        self.setStyleSheet("""
-            QMenu {
-                background-color: #2D2D30;
-                color: #D4D4D4;
-                border: 1px solid #3E3E42;
-            }
-            QMenu::item {
-                padding: 5px 20px 5px 20px;
-            }
-            QMenu::item:selected {
-                background-color: #3E3E42;
-            }
-        """)
-    
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _get_plain_text(self):
+        """Extract plain text from message content."""
+        content = self._msg.get('content', '')
+        if isinstance(content, list):
+            parts = [p.get('text', '') for p in content
+                     if isinstance(p, dict) and p.get('type') == 'text']
+            return ''.join(parts)
+        return str(content) if content else ''
+
+    def _get_sender_label(self):
+        """Return a human-readable sender label for the message."""
+        role = self._msg.get('role', '')
+        msg_type = self._msg.get('_type', '')
+        if msg_type == 'whisper':
+            whisper_from = self._msg.get('_whisper_from', '')
+            return f"WHISPER ({whisper_from})" if whisper_from else "WHISPER"
+        if role == 'user':
+            return self._msg.get('_user_name', 'Human User')
+        if role == 'assistant':
+            ai_name = self._msg.get('ai_name', 'AI')
+            model = self._msg.get('model', '')
+            return f"{ai_name} ({model})" if model else ai_name
+        if role == 'system':
+            return 'System'
+        return role or 'Unknown'
+
+    def _find_conversation_pane(self):
+        """Walk up the widget hierarchy to find ConversationPane."""
+        widget = self._parent_widget
+        while widget is not None:
+            if isinstance(widget, ConversationPane):
+                return widget
+            widget = widget.parent()
+        return None
+
+    # ------------------------------------------------------------------
+    # Action implementations
+    # ------------------------------------------------------------------
+
+    def _copy_plain_text(self):
+        """Copy full plain-text content to clipboard."""
+        text = self._get_plain_text()
+        if text.strip():
+            QApplication.clipboard().setText(text)
+
+    def _copy_markdown(self):
+        """Copy content with markdown formatting preserved (raw content)."""
+        text = self._get_plain_text()
+        if text.strip():
+            QApplication.clipboard().setText(text)
+
+    def _quote_reply(self):
+        """Insert quoted text into the input field and flash its border cyan."""
+        pane = self._find_conversation_pane()
+        if pane is None:
+            return
+        sender = self._get_sender_label()
+        text = self._get_plain_text()
+        if not text.strip():
+            return
+        # Build quoted lines: prefix each line with "> "
+        quoted_lines = '\n'.join(f'> {line}' for line in text.splitlines())
+        quoted = f'{sender}:\n{quoted_lines}\n\n'
+        # Insert at beginning of input field
+        current = pane.input_field.toPlainText()
+        pane.input_field.setPlainText(quoted + current)
+        # Move cursor to end
+        cursor = pane.input_field.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        pane.input_field.setTextCursor(cursor)
+        pane.input_field.setFocus()
+        # Flash border cyan for 300ms
+        original_style = pane.input_field.styleSheet()
+        flash_style = original_style + f"\nQTextEdit {{ border: 2px solid {COLORS['accent_cyan']}; }}"
+        pane.input_field.setStyleSheet(flash_style)
+        QTimer.singleShot(300, lambda: pane.input_field.setStyleSheet(original_style))
+
+    def _export_message(self):
+        """Export single message as a .txt file with sender + timestamp header."""
+        sender = self._get_sender_label()
+        text = self._get_plain_text()
+        if not text.strip():
+            return
+        # Build timestamp string
+        ts = self._msg.get('timestamp') or self._msg.get('_timestamp')
+        if ts:
+            try:
+                if isinstance(ts, str):
+                    dt = datetime.fromisoformat(ts)
+                elif isinstance(ts, (int, float)):
+                    dt = datetime.fromtimestamp(ts)
+                else:
+                    dt = datetime.now()
+                ts_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                ts_str = str(ts)
+        else:
+            ts_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Build file content
+        index_str = f"  [#msg-{self._msg_index}]" if self._msg_index is not None else ''
+        header = f"From: {sender}{index_str}\nDate: {ts_str}\n{'─' * 60}\n\n"
+        file_content = header + text + '\n'
+        # Ask for save location
+        safe_sender = re.sub(r'[^\w\-]', '_', sender)[:30]
+        default_name = f"message_{safe_sender}_{ts_str[:10]}.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self._parent_widget,
+            "Export Message",
+            default_name,
+            "Text Files (*.txt);;All Files (*)"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(file_content)
+            except Exception as e:
+                QMessageBox.critical(self._parent_widget, "Export Error", f"Could not save file:\n{e}")
+
+    def _copy_message_link(self):
+        """Copy #msg-{index} anchor to clipboard."""
+        if self._msg_index is not None:
+            anchor = f"#msg-{self._msg_index}"
+        else:
+            anchor = "#msg-unknown"
+        QApplication.clipboard().setText(anchor)
+
     def on_rabbithole_selected(self):
-        """Signal that rabbithole action was selected
-        
-        NOTE: With widget-based chat, text selection requires different handling.
-        """
-        # TODO: Implement selection tracking across message widgets
+        """Signal that rabbithole action was selected."""
         pass
-    
+
     def on_fork_selected(self):
-        """Signal that fork action was selected
-        
-        NOTE: With widget-based chat, text selection requires different handling.
-        """
-        # TODO: Implement selection tracking across message widgets
+        """Signal that fork action was selected."""
         pass
 
 class ConversationPane(QWidget):
