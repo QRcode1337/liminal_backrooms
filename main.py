@@ -118,6 +118,8 @@ class Worker(QRunnable):
     @pyqtSlot()
     def run(self):
         """Process the AI turn when the thread is started"""
+        import time
+        _start_time = time.monotonic()
         print(f"[Worker] >>> Starting run() for {self.ai_name} ({self.model})")
         
         # Emit started signal so UI can show typing indicator
@@ -146,10 +148,15 @@ class Worker(QRunnable):
             )
             print(f"[Worker] ai_turn completed for {self.ai_name}, result type: {type(result)}")
             
+            # Compute elapsed milliseconds from worker start to result ready
+            elapsed_ms = int((time.monotonic() - _start_time) * 1000)
+            
             # Emit both the text response and the full result object
             if isinstance(result, dict):
                 response_content = result.get('content', '')
                 print(f"[Worker] Emitting response for {self.ai_name}, content length: {len(response_content) if response_content else 0}")
+                # Embed elapsed time into result so on_ai_result_received can record it
+                result['_elapsed_ms'] = elapsed_ms
                 # Emit the simple text response for backward compatibility
                 self.signals.response.emit(self.ai_name, response_content)
                 # Also emit the full result object for HTML contribution processing
@@ -158,7 +165,7 @@ class Worker(QRunnable):
                 # Handle simple string responses
                 print(f"[Worker] Emitting string response for {self.ai_name}")
                 self.signals.response.emit(self.ai_name, result if result else "")
-                self.signals.result.emit(self.ai_name, {"content": result, "model": self.model})
+                self.signals.result.emit(self.ai_name, {"content": result, "model": self.model, "_elapsed_ms": elapsed_ms})
             
             # Emit finished signal
             print(f"[Worker] <<< Finished run() for {self.ai_name}, emitting finished signal")
@@ -2149,6 +2156,20 @@ class ConversationManager:
         This handler is only for side effects like auto-image generation, Sora, etc.
         """
         print(f"Result received from {ai_name}")
+        
+        # Record response time from the worker-embedded elapsed_ms
+        if isinstance(result, dict) and '_elapsed_ms' in result:
+            elapsed_ms = result['_elapsed_ms']
+            try:
+                stats_widget = self.app.right_sidebar.stats_widget
+                stats_widget.record_response_time(elapsed_ms)
+                # Estimate token density for the response and add to chart
+                content = result.get('content', '')
+                if isinstance(content, str) and content:
+                    est_tokens = max(1, len(content) // 4)
+                    stats_widget.add_token_density(est_tokens)
+            except Exception as _e:
+                print(f"[stats] Failed to record response time: {_e}")
         
         # Determine which conversation to update
         conversation = self.app.main_conversation
