@@ -189,48 +189,91 @@ class MessageWidget(QFrame):
     def _format_code_blocks(self, text):
         """
         Convert markdown code blocks and inline code to HTML for Qt RichText.
-        
+
         Uses table-based HTML structure that Qt renders properly.
+        Uses pygments for syntax highlighting when available, falling back to
+        plain html.escape() if pygments is not installed.
         """
         import re
         import html
-        
+
+        # Try to import pygments for syntax highlighting
+        _PYGMENTS_AVAILABLE = False
+        _pygments_highlight = None
+        _pygments_get_lexer = None
+        _pygments_text_lexer = None
+        _formatter = None
+        try:
+            from pygments import highlight as _pg_highlight
+            from pygments.lexers import get_lexer_by_name as _pg_get_lexer, TextLexer as _pg_text_lexer
+            from pygments.formatters import HtmlFormatter as _pg_formatter_cls
+            _PYGMENTS_AVAILABLE = True
+            _pygments_highlight = _pg_highlight
+            _pygments_get_lexer = _pg_get_lexer
+            _pygments_text_lexer = _pg_text_lexer
+            _formatter = _pg_formatter_cls(inline_styles=True, style='monokai', nowrap=True)
+        except ImportError:
+            pass
+
         # Split by code blocks first (```...```)
         code_block_pattern = r'```(\w*)\n?(.*?)```'
-        
+
         parts = []
         last_end = 0
-        
+
         for match in re.finditer(code_block_pattern, text, re.DOTALL):
             # Text before this code block
             before_text = text[last_end:match.start()]
             parts.append(('text', before_text))
-            
+
             # The code block
             lang = match.group(1) or ''
             code = match.group(2)
             parts.append(('code_block', code, lang))
-            
+
             last_end = match.end()
-        
+
         # Remaining text
         if last_end < len(text):
             parts.append(('text', text[last_end:]))
-        
+
         # Process each part
         result = []
-        
+
         # Colors for code blocks
         code_bg = '#001100'
         header_bg = '#002200'
         border_color = COLORS.get('border', '#0D3B0D')
         code_text_color = '#E0E0E0'
-        
+
         for part in parts:
             if part[0] == 'code_block':
-                code = html.escape(part[1].rstrip())
                 lang = part[2].lower()
-                
+                raw_code = part[1].rstrip()
+
+                # Produce highlighted HTML for code content
+                code_html = html.escape(raw_code)
+                if _PYGMENTS_AVAILABLE and _pygments_highlight and _pygments_get_lexer and _pygments_text_lexer and _formatter:
+                    try:
+                        if lang:
+                            try:
+                                lexer = _pygments_get_lexer(lang, stripall=True)
+                            except Exception:
+                                lexer = _pygments_text_lexer(stripall=True)
+                        else:
+                            lexer = _pygments_text_lexer(stripall=True)
+                        highlighted = _pygments_highlight(raw_code, lexer, _formatter)
+                        # pygments wraps output in a <div class="highlight"> — strip that
+                        # wrapper so we can embed inline-styled spans inside our own <pre>
+                        highlighted = re.sub(r'^<div[^>]*>', '', highlighted, count=1)
+                        highlighted = re.sub(r'</div>\s*$', '', highlighted)
+                        # pygments may also wrap in a <pre> — strip it so we control <pre>
+                        highlighted = re.sub(r'^<pre[^>]*>', '', highlighted, count=1)
+                        highlighted = re.sub(r'</pre>\s*$', '', highlighted)
+                        code_html = highlighted
+                    except Exception:
+                        code_html = html.escape(raw_code)
+
                 # Language header row
                 lang_row = ''
                 if lang:
@@ -241,7 +284,7 @@ class MessageWidget(QFrame):
                         f'font-family: Consolas, Monaco, monospace; font-weight: bold;">'
                         f'{lang.upper()}</span></td></tr>'
                     )
-                
+
                 # Code block with subtle border
                 result.append(
                     f'<table cellspacing="0" cellpadding="0" '
@@ -251,13 +294,13 @@ class MessageWidget(QFrame):
                     f'{lang_row}'
                     f'<tr><td style="background-color: {code_bg}; padding: 10px 12px;">'
                     f'<pre style="margin: 0; font-family: Consolas, Monaco, monospace; '
-                    f'font-size: 9pt; white-space: pre-wrap; color: {code_text_color};">{code}</pre>'
+                    f'font-size: 9pt; white-space: pre-wrap; color: {code_text_color};">{code_html}</pre>'
                     f'</td></tr></table></td></tr></table>'
                 )
             else:
                 # Regular text - escape and process inline code
                 text_part = html.escape(part[1])
-                
+
                 # Replace inline code `...` with styled spans
                 inline_pattern = r'`([^`]+)`'
                 text_part = re.sub(
@@ -268,12 +311,12 @@ class MessageWidget(QFrame):
                     f'\\1</span>',
                     text_part
                 )
-                
+
                 # Convert newlines to <br>
                 text_part = text_part.replace('\n', '<br/>')
-                
+
                 result.append(text_part)
-        
+
         return ''.join(result)
     
     def _create_header_widget(self, name_text, color):
