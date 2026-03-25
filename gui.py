@@ -140,6 +140,15 @@ class MessageWidget(QFrame):
             est_tokens = char_count // 4
             tooltip_parts.append(f"~{est_tokens} tokens ({char_count} chars)")
 
+        # Add whisper metadata if present
+        if self.message_data.get('_type') == 'whisper':
+            whisper_from = self.message_data.get('_whisper_from', '')
+            whisper_to = self.message_data.get('_whisper_to', '')
+            if whisper_from:
+                tooltip_parts.append(f"From: {whisper_from}")
+            if whisper_to:
+                tooltip_parts.append(f"To: {whisper_to}")
+
         self.setToolTip('\n'.join(tooltip_parts))
 
     def _setup_ui(self):
@@ -167,6 +176,8 @@ class MessageWidget(QFrame):
             self._setup_generated_image()
         elif msg_type == 'generated_video':
             self._setup_generated_video()
+        elif msg_type == 'whisper':
+            self._setup_whisper_message(text_content)
         elif role == 'user':
             self._setup_user_message(text_content)
         elif role == 'assistant':
@@ -546,6 +557,48 @@ class MessageWidget(QFrame):
             path_label.setStyleSheet(f"background-color: transparent; color: {COLORS['text_normal']}; font-size: 9pt;")
             self.layout().addWidget(path_label)
     
+    def _setup_whisper_message(self, text):
+        """Setup whisper message style — private, muted blue-gray aesthetic."""
+        WHISPER_BORDER = '#6272A4'
+        WHISPER_BG = '#050A15'
+        WHISPER_TEXT = '#8899AA'
+
+        whisper_from = self.message_data.get('_whisper_from', '')
+        whisper_to = self.message_data.get('_whisper_to', '')
+
+        # Build header label
+        if whisper_from and whisper_to:
+            header_text = f"\U0001f92b WHISPER: {whisper_from} \u2192 {whisper_to}"
+        elif whisper_from:
+            header_text = f"\U0001f92b WHISPER: {whisper_from}"
+        elif whisper_to:
+            header_text = f"\U0001f92b WHISPER \u2192 {whisper_to}"
+        else:
+            header_text = "\U0001f92b WHISPER"
+
+        self.setStyleSheet(f"""
+            MessageWidget {{
+                background-color: {WHISPER_BG};
+                border-left: 3px solid {WHISPER_BORDER};
+                border-radius: 0px;
+            }}
+        """)
+
+        header = self._create_header_widget(header_text, WHISPER_BORDER)
+        self.layout().addWidget(header)
+
+        # Format code blocks and use RichText, italic content
+        formatted_text = self._format_code_blocks(text)
+        content = QLabel(formatted_text)
+        content.setStyleSheet(
+            f"background-color: transparent; color: {WHISPER_TEXT}; font-style: italic;"
+        )
+        content.setWordWrap(True)
+        content.setTextFormat(Qt.TextFormat.RichText)
+        content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.layout().addWidget(content)
+        self._content_label = content
+
     def _setup_user_message(self, text):
         """Setup human user message style - left-aligned like AI messages."""
         self.setStyleSheet(f"""
