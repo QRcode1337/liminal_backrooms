@@ -26,7 +26,15 @@ import subprocess
 import base64
 from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap, QShortcut
-from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect, QSlider
+
+try:
+    from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+    from PyQt6.QtMultimediaWidgets import QVideoWidget
+    from PyQt6.QtCore import QUrl
+    MULTIMEDIA_AVAILABLE = True
+except ImportError:
+    MULTIMEDIA_AVAILABLE = False
 
 from config import (
     AI_MODELS,
@@ -2726,21 +2734,74 @@ class ImagePreviewPane(QWidget):
 
 
 class VideoPreviewPane(QWidget):
-    """Pane to display generated videos with navigation"""
+    """Pane to display generated videos with navigation.
+
+    When PyQt6 multimedia libraries are available, video plays inline using
+    QMediaPlayer + QVideoWidget with full playback controls.  Falls back to
+    the system player button when the libraries are missing.
+    """
+
+    # ------------------------------------------------------------------ #
+    #  Helpers                                                             #
+    # ------------------------------------------------------------------ #
+    _NAV_BTN_STYLE = f"""
+        QPushButton {{
+            background-color: {COLORS['bg_medium']};
+            color: {COLORS['text_normal']};
+            border: 1px solid {COLORS['border']};
+            border-radius: 0px;
+            padding: 6px 12px;
+            font-weight: bold;
+        }}
+        QPushButton:hover {{
+            background-color: {COLORS['bg_light']};
+            border-color: {COLORS['accent_cyan']};
+        }}
+        QPushButton:disabled {{
+            color: {COLORS['text_dim']};
+            background-color: {COLORS['bg_dark']};
+        }}
+    """
+
+    _CTRL_BTN_STYLE = f"""
+        QPushButton {{
+            background-color: {COLORS['bg_medium']};
+            color: #00FF41;
+            border: 1px solid #0D3B0D;
+            border-radius: 0px;
+            padding: 5px 10px;
+            font-weight: bold;
+            font-size: 13px;
+            min-width: 32px;
+        }}
+        QPushButton:hover {{
+            background-color: #001A00;
+            border-color: #00FF41;
+        }}
+        QPushButton:disabled {{
+            color: {COLORS['text_dim']};
+            background-color: {COLORS['bg_dark']};
+        }}
+    """
+
     def __init__(self):
         super().__init__()
         self.current_video_path = None
-        self.session_videos = []  # List of all videos generated this session
-        self.session_metadata = []  # List of metadata dicts {ai_name, prompt} for each video
-        self.current_index = -1   # Current video index
+        self.session_videos = []       # List of all videos generated this session
+        self.session_metadata = []     # List of metadata dicts {ai_name, prompt}
+        self.current_index = -1        # Current video index
+        self._slider_pressed = False   # Track manual scrub drag
         self.setup_ui()
-    
+
+    # ------------------------------------------------------------------ #
+    #  UI Construction                                                     #
+    # ------------------------------------------------------------------ #
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        # Title with consistent tab header styling
+        layout.setSpacing(8)
+
+        # ----- Title -----
         self.title = QLabel("GENERATED VIDEOS")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
@@ -2754,8 +2815,8 @@ class VideoPreviewPane(QWidget):
             text-transform: uppercase;
         """)
         layout.addWidget(self.title)
-        
-        # AI name label (below title)
+
+        # ----- AI name label -----
         self.ai_label = QLabel("")
         self.ai_label.setStyleSheet(f"""
             QLabel {{
@@ -2767,8 +2828,8 @@ class VideoPreviewPane(QWidget):
         """)
         self.ai_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.ai_label)
-        
-        # Prompt label (below AI name)
+
+        # ----- Prompt label -----
         self.prompt_label = QLabel("")
         self.prompt_label.setStyleSheet(f"""
             QLabel {{
@@ -2781,8 +2842,174 @@ class VideoPreviewPane(QWidget):
         self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.prompt_label.setWordWrap(True)
         layout.addWidget(self.prompt_label)
-        
-        # Video display area - we'll show a thumbnail or placeholder
+
+        # ----- Video display area -----
+        if MULTIMEDIA_AVAILABLE:
+            self._setup_inline_player(layout)
+        else:
+            self._setup_fallback_player(layout)
+
+        # ----- Navigation controls (prev / position / next) -----
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+
+        self.prev_button = QPushButton("◀ Prev")
+        self.prev_button.setStyleSheet(self._NAV_BTN_STYLE)
+        self.prev_button.clicked.connect(self.show_previous)
+        self.prev_button.setEnabled(False)
+        nav_layout.addWidget(self.prev_button)
+
+        self.position_label = QLabel("")
+        self.position_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
+            }}
+        """)
+        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.position_label, 1)
+
+        self.next_button = QPushButton("Next ▶")
+        self.next_button.setStyleSheet(self._NAV_BTN_STYLE)
+        self.next_button.clicked.connect(self.show_next)
+        self.next_button.setEnabled(False)
+        nav_layout.addWidget(self.next_button)
+
+        layout.addLayout(nav_layout)
+
+        # ----- Info label -----
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                padding: 5px;
+            }}
+        """)
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+
+        # ----- Open folder button -----
+        self.open_button = QPushButton("📂 Open Videos Folder")
+        self.open_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 0px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['bg_light']};
+                border-color: {COLORS['accent_cyan']};
+            }}
+        """)
+        self.open_button.clicked.connect(self.open_videos_folder)
+        layout.addWidget(self.open_button)
+
+    def _setup_inline_player(self, layout):
+        """Build the inline QVideoWidget + controls area."""
+        # Video widget
+        self.video_widget = QVideoWidget()
+        self.video_widget.setMinimumHeight(200)
+        self.video_widget.setStyleSheet(
+            f"background-color: #000000; border: 1px solid #0D3B0D;"
+        )
+        layout.addWidget(self.video_widget, 1)
+
+        # Media player
+        self.player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.player.setAudioOutput(self.audio_output)
+        self.player.setVideoOutput(self.video_widget)
+
+        # Connect signals
+        self.player.positionChanged.connect(self._on_position_changed)
+        self.player.durationChanged.connect(self._on_duration_changed)
+        self.player.playbackStateChanged.connect(self._on_playback_state_changed)
+
+        # ----- Playback controls row -----
+        ctrl_layout = QHBoxLayout()
+        ctrl_layout.setSpacing(6)
+
+        self.play_pause_btn = QPushButton("▶")
+        self.play_pause_btn.setStyleSheet(self._CTRL_BTN_STYLE)
+        self.play_pause_btn.clicked.connect(self._on_play_pause)
+        self.play_pause_btn.setEnabled(False)
+        ctrl_layout.addWidget(self.play_pause_btn)
+
+        self.stop_btn = QPushButton("⏹")
+        self.stop_btn.setStyleSheet(self._CTRL_BTN_STYLE)
+        self.stop_btn.clicked.connect(self._on_stop)
+        self.stop_btn.setEnabled(False)
+        ctrl_layout.addWidget(self.stop_btn)
+
+        # Seek slider
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setRange(0, 0)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #0D3B0D;
+                height: 6px;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #00FF41;
+                width: 14px;
+                height: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #00FF41;
+                height: 6px;
+                border-radius: 3px;
+            }
+        """)
+        self.seek_slider.sliderPressed.connect(self._on_slider_pressed)
+        self.seek_slider.sliderReleased.connect(self._on_slider_released)
+        self.seek_slider.sliderMoved.connect(self._on_slider_moved)
+        ctrl_layout.addWidget(self.seek_slider, 1)
+
+        # Duration label
+        self.duration_label = QLabel("--:-- / --:--")
+        self.duration_label.setStyleSheet(f"""
+            QLabel {{
+                color: #00FF41;
+                font-size: 10px;
+                font-family: monospace;
+                min-width: 90px;
+            }}
+        """)
+        ctrl_layout.addWidget(self.duration_label)
+
+        # Mute toggle
+        self.mute_btn = QPushButton("🔊")
+        self.mute_btn.setStyleSheet(self._CTRL_BTN_STYLE)
+        self.mute_btn.setCheckable(True)
+        self.mute_btn.clicked.connect(self._on_mute)
+        ctrl_layout.addWidget(self.mute_btn)
+
+        layout.addLayout(ctrl_layout)
+
+        # Placeholder label shown when no video is loaded
+        self.video_placeholder = QLabel("No videos generated yet")
+        self.video_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_placeholder.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_dim']};
+                padding: 20px;
+                font-size: 11px;
+            }}
+        """)
+        layout.addWidget(self.video_placeholder)
+        self.video_placeholder.hide()
+
+    def _setup_fallback_player(self, layout):
+        """Build the fallback UI (system player) when multimedia unavailable."""
+        # Placeholder / info label
         self.video_label = QLabel("No videos generated yet")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet(f"""
@@ -2795,8 +3022,21 @@ class VideoPreviewPane(QWidget):
         """)
         self.video_label.setWordWrap(True)
         layout.addWidget(self.video_label, 1)
-        
-        # Play button
+
+        # Fallback notice
+        fallback_note = QLabel("[Install PyQt6-Qt6 for inline playback]")
+        fallback_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fallback_note.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                font-style: italic;
+                padding: 4px;
+            }}
+        """)
+        layout.addWidget(fallback_note)
+
+        # System play button
         self.play_button = QPushButton("▶ Play Video")
         self.play_button.setStyleSheet(f"""
             QPushButton {{
@@ -2816,230 +3056,233 @@ class VideoPreviewPane(QWidget):
                 color: {COLORS['text_dim']};
             }}
         """)
-        self.play_button.clicked.connect(self.play_current_video)
+        self.play_button.clicked.connect(self._play_system)
         self.play_button.setEnabled(False)
         layout.addWidget(self.play_button)
-        
-        # Navigation controls
-        nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(8)
-        
-        # Previous button
-        self.prev_button = QPushButton("◀ Prev")
-        self.prev_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
-        self.prev_button.clicked.connect(self.show_previous)
-        self.prev_button.setEnabled(False)
-        nav_layout.addWidget(self.prev_button)
-        
-        # Position indicator
-        self.position_label = QLabel("")
-        self.position_label.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['text_dim']};
-                font-size: 11px;
-            }}
-        """)
-        self.position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        nav_layout.addWidget(self.position_label, 1)
-        
-        # Next button
-        self.next_button = QPushButton("Next ▶")
-        self.next_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-            QPushButton:disabled {{
-                color: {COLORS['text_dim']};
-                background-color: {COLORS['bg_dark']};
-            }}
-        """)
-        self.next_button.clicked.connect(self.show_next)
-        self.next_button.setEnabled(False)
-        nav_layout.addWidget(self.next_button)
-        
-        layout.addLayout(nav_layout)
-        
-        # Video info label
-        self.info_label = QLabel("")
-        self.info_label.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['text_dim']};
-                font-size: 10px;
-                padding: 5px;
-            }}
-        """)
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.info_label.setWordWrap(True)
-        layout.addWidget(self.info_label)
-        
-        # Open in folder button
-        self.open_button = QPushButton("📂 Open Videos Folder")
-        self.open_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_normal']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 0px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                border-color: {COLORS['accent_cyan']};
-            }}
-        """)
-        self.open_button.clicked.connect(self.open_videos_folder)
-        layout.addWidget(self.open_button)
-    
+
+    # ------------------------------------------------------------------ #
+    #  Public API                                                          #
+    # ------------------------------------------------------------------ #
     def add_video(self, video_path, ai_name="", prompt=""):
-        """Add a new video to the session gallery and display it"""
+        """Add a new video to the session gallery and display it."""
         if video_path and os.path.exists(video_path):
-            # Avoid duplicates
             if video_path not in self.session_videos:
                 self.session_videos.append(video_path)
                 self.session_metadata.append({"ai_name": ai_name, "prompt": prompt})
-            # Jump to the new video
             self.current_index = len(self.session_videos) - 1
             self._display_current()
-    
+
     def set_video(self, video_path, ai_name="", prompt=""):
-        """Display a video - also adds to gallery if new"""
+        """Display a video — also adds to gallery if new."""
         self.add_video(video_path, ai_name, prompt)
-    
-    def _display_current(self):
-        """Display the video at current_index"""
-        if not self.session_videos or self.current_index < 0:
+
+    def show_previous(self):
+        """Show the previous video."""
+        if self.current_index > 0:
+            self.current_index -= 1
+            self._display_current()
+
+    def show_next(self):
+        """Show the next video."""
+        if self.current_index < len(self.session_videos) - 1:
+            self.current_index += 1
+            self._display_current()
+
+    def clear_session(self):
+        """Clear all session videos (e.g. when starting a new conversation)."""
+        if MULTIMEDIA_AVAILABLE:
+            self.player.stop()
+            self.player.setSource(QUrl())
+            self.seek_slider.setRange(0, 0)
+            self.duration_label.setText("--:-- / --:--")
+            self.play_pause_btn.setText("▶")
+            self.play_pause_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
+            self.video_placeholder.setText("No videos generated yet")
+            self.video_placeholder.show()
+        else:
             self.video_label.setText("No videos generated yet")
-            self.info_label.setText("")
-            self.position_label.setText("")
-            self.ai_label.setText("")
-            self.prompt_label.setText("")
-            self.prev_button.setEnabled(False)
-            self.next_button.setEnabled(False)
-            self.play_button.setEnabled(False)
-            return
-        
-        video_path = self.session_videos[self.current_index]
-        self.current_video_path = video_path
-        
-        # Get metadata for this video
-        metadata = self.session_metadata[self.current_index] if self.current_index < len(self.session_metadata) else {}
-        ai_name = metadata.get("ai_name", "")
-        prompt = metadata.get("prompt", "")
-        
-        # Update AI name and prompt labels
-        self.ai_label.setText(ai_name if ai_name else "")
-        self.prompt_label.setText(f'"{prompt}"' if prompt else "")
-        
-        if os.path.exists(video_path):
-            filename = os.path.basename(video_path)
-            # Show video info
-            self.video_label.setText(f"🎬 {filename}\n\n(Click Play to view)")
             self.video_label.setStyleSheet(f"""
                 QLabel {{
                     background-color: {COLORS['bg_medium']};
-                    border: 1px solid {COLORS['border']};
-                    color: {COLORS['text_bright']};
+                    color: {COLORS['text_dim']};
                     padding: 20px;
                     min-height: 150px;
                 }}
             """)
-            self.info_label.setText(filename)
-            self.play_button.setEnabled(True)
-        else:
-            self.video_label.setText("Video not found")
-            self.info_label.setText("")
             self.play_button.setEnabled(False)
-        
-        # Update navigation
-        total = len(self.session_videos)
-        current = self.current_index + 1
-        self.position_label.setText(f"{current} of {total}")
-        self.prev_button.setEnabled(self.current_index > 0)
-        self.next_button.setEnabled(self.current_index < total - 1)
-    
-    def show_previous(self):
-        """Show the previous video"""
-        if self.current_index > 0:
-            self.current_index -= 1
-            self._display_current()
-    
-    def show_next(self):
-        """Show the next video"""
-        if self.current_index < len(self.session_videos) - 1:
-            self.current_index += 1
-            self._display_current()
-    
-    def play_current_video(self):
-        """Open the current video in the default video player"""
-        if self.current_video_path and os.path.exists(self.current_video_path):
-            import subprocess
-            import sys
-            if sys.platform == 'win32':
-                os.startfile(self.current_video_path)
-            elif sys.platform == 'darwin':
-                subprocess.Popen(['open', self.current_video_path])
-            else:
-                subprocess.Popen(['xdg-open', self.current_video_path])
-    
-    def clear_session(self):
-        """Clear all session videos (e.g., when starting a new conversation)"""
+
         self.session_videos = []
         self.session_metadata = []
         self.current_index = -1
         self.current_video_path = None
-        self.video_label.setText("No videos generated yet")
-        self.video_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
-                padding: 20px;
-                min-height: 150px;
-            }}
-        """)
         self.info_label.setText("")
         self.position_label.setText("")
         self.ai_label.setText("")
         self.prompt_label.setText("")
         self.prev_button.setEnabled(False)
         self.next_button.setEnabled(False)
-        self.play_button.setEnabled(False)
-    
+
     def open_videos_folder(self):
-        """Open the videos folder in file explorer"""
+        """Open the videos folder in the system file manager."""
         import subprocess
         videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
-        if os.path.exists(videos_dir):
+        os.makedirs(videos_dir, exist_ok=True)
+        if sys.platform == 'win32':
             subprocess.Popen(f'explorer "{videos_dir}"')
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', videos_dir])
         else:
-            # Try to create it
-            os.makedirs(videos_dir, exist_ok=True)
-            subprocess.Popen(f'explorer "{videos_dir}"')
+            subprocess.Popen(['xdg-open', videos_dir])
+
+    # ------------------------------------------------------------------ #
+    #  Internal: display                                                   #
+    # ------------------------------------------------------------------ #
+    def _display_current(self):
+        """Load and display the video at current_index."""
+        if not self.session_videos or self.current_index < 0:
+            if MULTIMEDIA_AVAILABLE:
+                self.player.stop()
+                self.player.setSource(QUrl())
+                self.video_placeholder.setText("No videos generated yet")
+                self.video_placeholder.show()
+                self.play_pause_btn.setEnabled(False)
+                self.stop_btn.setEnabled(False)
+            else:
+                self.video_label.setText("No videos generated yet")
+                self.play_button.setEnabled(False)
+            self.info_label.setText("")
+            self.position_label.setText("")
+            self.ai_label.setText("")
+            self.prompt_label.setText("")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            return
+
+        video_path = self.session_videos[self.current_index]
+        self.current_video_path = video_path
+
+        metadata = (self.session_metadata[self.current_index]
+                    if self.current_index < len(self.session_metadata) else {})
+        ai_name = metadata.get("ai_name", "")
+        prompt = metadata.get("prompt", "")
+        self.ai_label.setText(ai_name)
+        self.prompt_label.setText(f'"{prompt}"' if prompt else "")
+
+        if os.path.exists(video_path):
+            filename = os.path.basename(video_path)
+            self.info_label.setText(filename)
+
+            if MULTIMEDIA_AVAILABLE:
+                # Hide placeholder, load video, and autoplay
+                self.video_placeholder.hide()
+                self.player.stop()
+                self.player.setSource(QUrl.fromLocalFile(video_path))
+                self.play_pause_btn.setEnabled(True)
+                self.stop_btn.setEnabled(True)
+                self.player.play()
+            else:
+                self.video_label.setText(f"🎬 {filename}\n\n(Click Play to view)")
+                self.video_label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {COLORS['bg_medium']};
+                        border: 1px solid {COLORS['border']};
+                        color: {COLORS['text_bright']};
+                        padding: 20px;
+                        min-height: 150px;
+                    }}
+                """)
+                self.play_button.setEnabled(True)
+        else:
+            if MULTIMEDIA_AVAILABLE:
+                self.video_placeholder.setText("Video not found")
+                self.video_placeholder.show()
+                self.play_pause_btn.setEnabled(False)
+                self.stop_btn.setEnabled(False)
+            else:
+                self.video_label.setText("Video not found")
+                self.play_button.setEnabled(False)
+            self.info_label.setText("")
+
+        total = len(self.session_videos)
+        current = self.current_index + 1
+        self.position_label.setText(f"{current} of {total}")
+        self.prev_button.setEnabled(self.current_index > 0)
+        self.next_button.setEnabled(self.current_index < total - 1)
+
+    # ------------------------------------------------------------------ #
+    #  Internal: inline player signal handlers                            #
+    # ------------------------------------------------------------------ #
+    def _on_position_changed(self, position_ms: int):
+        """Update seek slider and duration label as video plays."""
+        if not self._slider_pressed:
+            self.seek_slider.setValue(position_ms)
+        duration_ms = self.player.duration()
+        self.duration_label.setText(
+            f"{self._ms_to_str(position_ms)} / {self._ms_to_str(duration_ms)}"
+        )
+
+    def _on_duration_changed(self, duration_ms: int):
+        """Update slider range when duration becomes known."""
+        self.seek_slider.setRange(0, duration_ms)
+
+    def _on_playback_state_changed(self, state):
+        """Sync the play/pause button icon with the actual playback state."""
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.play_pause_btn.setText("⏸")
+        else:
+            self.play_pause_btn.setText("▶")
+
+    def _on_play_pause(self):
+        """Toggle between play and pause."""
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def _on_stop(self):
+        """Stop playback and seek to beginning."""
+        self.player.stop()
+
+    def _on_slider_pressed(self):
+        self._slider_pressed = True
+
+    def _on_slider_released(self):
+        self._slider_pressed = False
+        self.player.setPosition(self.seek_slider.value())
+
+    def _on_slider_moved(self, value: int):
+        """Scrub while dragging."""
+        self.player.setPosition(value)
+
+    def _on_mute(self, checked: bool):
+        """Toggle audio mute."""
+        self.audio_output.setMuted(checked)
+        self.mute_btn.setText("🔇" if checked else "🔊")
+
+    # ------------------------------------------------------------------ #
+    #  Internal: fallback                                                  #
+    # ------------------------------------------------------------------ #
+    def _play_system(self):
+        """Open the current video in the system default player (fallback)."""
+        if self.current_video_path and os.path.exists(self.current_video_path):
+            if sys.platform == 'win32':
+                os.startfile(self.current_video_path)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', self.current_video_path])
+            else:
+                subprocess.Popen(['xdg-open', self.current_video_path])
+
+    # ------------------------------------------------------------------ #
+    #  Utilities                                                           #
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _ms_to_str(ms: int) -> str:
+        """Convert milliseconds to MM:SS string."""
+        if ms < 0:
+            return "--:--"
+        total_s = ms // 1000
+        return f"{total_s // 60:02d}:{total_s % 60:02d}"
 
 
 class MiniBarChart(QWidget):
