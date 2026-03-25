@@ -16,6 +16,7 @@ openai = "^2.8.1"
 anthropic = "^0.75.0"
 together = "^1.5.30"
 beautifulsoup4 = "^4.14.2"
+pygments = "^2.18"
 networkx = "^3.1"
 duckduckgo-search = "^6.3.5"
 

@@ -70,6 +70,33 @@ COLORS = {
 
 
 # =============================================================================
+# SYNTAX HIGHLIGHTING COLOR PALETTE - Phosphor Green CRT Compatible
+# =============================================================================
+
+SYNTAX_COLORS = {
+    'keyword':     '#FF79C6',
+    'builtin':     '#8BE9FD',
+    'string':      '#F1FA8C',
+    'comment':     '#6272A4',
+    'number':      '#BD93F9',
+    'operator':    '#FF79C6',
+    'function':    '#50FA7B',
+    'class_name':  '#FFB86C',
+    'decorator':   '#FF79C6',
+    'variable':    '#F8F8F2',
+    'type':        '#8BE9FD',
+    'error':       '#FF5555',
+    'preprocessor':'#FF79C6',
+    'constant':    '#BD93F9',
+}
+
+
+def get_syntax_colors() -> dict:
+    """Return syntax highlighting colors for code block renderer."""
+    return SYNTAX_COLORS.copy()
+
+
+# =============================================================================
 # FONT CONFIGURATION
 # =============================================================================
 
