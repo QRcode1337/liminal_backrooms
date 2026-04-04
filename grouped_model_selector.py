@@ -13,12 +13,52 @@ All model data is imported from config.AI_MODELS - this file contains NO duplica
 All styling is imported from styles.py - the single source of truth for colors/fonts.
 """
 
-from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate
+import os
+from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QLineEdit, QListView
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont, QColor
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSortFilterProxyModel
 
 from config import AI_MODELS, get_model_id
 from styles import COLORS
+
+# Map provider prefixes to the env var needed for direct API access
+_PROVIDER_API_KEYS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "x-ai": "XAI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "moonshotai": "KIMIK2_API_KEY",
+    "together": "TOGETHERAI_API_KEY",
+}
+
+
+def _check_model_available(model_id: str) -> bool:
+    """Check if the API key for a model's provider is configured.
+
+    Free-tier models (via OpenRouter) only need OPENROUTER_API_KEY.
+    Direct provider models need the provider-specific key.
+    """
+    if not model_id:
+        return True
+    # Free-tier via OpenRouter
+    if ":free" in model_id:
+        return bool(os.getenv("OPENROUTER_API_KEY"))
+    # Direct provider models (prefix::model)
+    if "::" in model_id:
+        provider = model_id.split("::")[0]
+        env_key = {
+            "groq": "GROQ_API_KEY",
+            "google-direct": "GOOGLE_API_KEY",
+            "xai-direct": "XAI_API_KEY",
+            "kimi-direct": "KIMIK2_API_KEY",
+            "ollama": "OLLAMA_API_KEY",
+        }.get(provider)
+        if env_key:
+            return bool(os.getenv(env_key, os.getenv(env_key.lower(), "")))
+        return True
+    # OpenRouter-routed paid models need the OpenRouter key
+    return bool(os.getenv("OPENROUTER_API_KEY"))
 
 
 class GroupedItemDelegate(QStyledItemDelegate):
@@ -217,6 +257,10 @@ class GroupedModelComboBox(QComboBox):
         
         # Disable scroll wheel changing selection - let parent scroll instead
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        # Search state for keyboard filtering
+        self._search_text = ""
+        self._search_timer_id = None
     
     def wheelEvent(self, event):
         """Ignore wheel events so parent scroll area can scroll instead."""
@@ -258,10 +302,14 @@ class GroupedModelComboBox(QComboBox):
                 
                 for display_name, model_id in models.items():
                     # Add model item (selectable) - show both display name and model ID
-                    full_display = f"{display_name} ({model_id})"
+                    available = _check_model_available(model_id)
+                    prefix = "" if available else "⚠ "
+                    full_display = f"{prefix}{display_name} ({model_id})"
                     model_item = QStandardItem(full_display)
                     model_item.setData("model", Qt.ItemDataRole.UserRole + 1)
                     model_item.setData(model_id, Qt.ItemDataRole.UserRole + 2)
+                    if not available:
+                        model_item.setToolTip("API key not configured for this model's provider")
                     self.item_model.appendRow(model_item)
 
                     # Track indices for lookup
@@ -330,10 +378,59 @@ class GroupedModelComboBox(QComboBox):
         if display_name in self._display_name_to_index:
             self.setCurrentIndex(self._display_name_to_index[display_name])
     
+    def keyPressEvent(self, event):
+        """Handle keyboard input for incremental search when dropdown is open."""
+        key = event.key()
+
+        # Backspace clears last character of search
+        if key == Qt.Key.Key_Backspace:
+            if self._search_text:
+                self._search_text = self._search_text[:-1]
+                self._apply_search()
+            return
+
+        # Escape clears search
+        if key == Qt.Key.Key_Escape:
+            self._search_text = ""
+            return super().keyPressEvent(event)
+
+        text = event.text()
+        if text and text.isprintable():
+            self._search_text += text.lower()
+            self._apply_search()
+            # Reset search after 1.5 seconds of inactivity
+            if self._search_timer_id is not None:
+                self.killTimer(self._search_timer_id)
+            self._search_timer_id = self.startTimer(1500)
+            return
+
+        super().keyPressEvent(event)
+
+    def timerEvent(self, event):
+        """Clear search text after timeout."""
+        if event.timerId() == self._search_timer_id:
+            self.killTimer(self._search_timer_id)
+            self._search_timer_id = None
+            self._search_text = ""
+        else:
+            super().timerEvent(event)
+
+    def _apply_search(self):
+        """Jump to the first model matching the current search text."""
+        if not self._search_text:
+            return
+        query = self._search_text
+        for row in range(self.item_model.rowCount()):
+            item = self.item_model.item(row)
+            if item and item.data(Qt.ItemDataRole.UserRole + 1) == "model":
+                if query in item.text().lower():
+                    self.setCurrentIndex(row)
+                    return
+
     def refresh_models(self):
         """
         Refresh the model list from config.AI_MODELS.
-        
+
         Call this if AI_MODELS has been modified at runtime.
         """
         current_model_id = self.get_selected_model_id()

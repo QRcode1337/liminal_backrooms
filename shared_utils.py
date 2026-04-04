@@ -15,7 +15,7 @@ import base64
 from together import Together
 from openai import OpenAI
 import re
-from config import OUTPUTS_DIR
+from config import OUTPUTS_DIR, API_MAX_TOKENS, API_MAX_TOKENS_SMALL, IMAGE_GEN_MAX_TOKENS
 try:
     from bs4 import BeautifulSoup
 except ImportError:
@@ -32,6 +32,60 @@ load_dotenv()
 
 # Initialize Anthropic client with API key
 anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+
+
+def get_visible_messages(conversation: list) -> list:
+    """Filter conversation to only visible messages (not hidden or typing indicators)."""
+    return [msg for msg in conversation if isinstance(msg, dict) and not msg.get('hidden', False)]
+
+
+def _iter_sse_stream(response, stream_callback=None):
+    """Parse an SSE (Server-Sent Events) stream from an HTTP response.
+
+    Handles the common pattern used by Claude, OpenRouter, and DeepSeek APIs:
+    - Lines prefixed with ``data: ``
+    - ``[DONE]`` sentinel
+    - JSON chunks with ``choices[0].delta.content`` or Claude's ``content_block_delta``
+
+    Returns:
+        The full concatenated response text.
+    """
+    full_response = ""
+    for line in response.iter_lines():
+        if not line:
+            continue
+        line_text = line.decode('utf-8')
+        if not line_text.startswith('data: '):
+            continue
+        json_str = line_text[6:]
+        if json_str.strip() in ('[DONE]', ''):
+            break
+        try:
+            chunk_data = json.loads(json_str)
+        except json.JSONDecodeError:
+            continue
+
+        # Claude-style: content_block_delta
+        if chunk_data.get('type') == 'content_block_delta':
+            delta = chunk_data.get('delta', {})
+            if delta.get('type') == 'text_delta':
+                text = delta.get('text', '')
+                if text:
+                    full_response += text
+                    if stream_callback:
+                        stream_callback(text)
+            continue
+
+        # OpenAI/OpenRouter-style: choices[0].delta.content
+        choices = chunk_data.get('choices', [])
+        if choices:
+            delta = choices[0].get('delta', {})
+            content = delta.get('content', '')
+            if content:
+                full_response += content
+                if stream_callback:
+                    stream_callback(content)
+    return full_response
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -52,7 +106,7 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callb
     # Ensure we have a system prompt
     payload = {
         "model": model_id,
-        "max_tokens": 8000,
+        "max_tokens": API_MAX_TOKENS,
         "temperature": temperature,
         "stream": stream_callback is not None  # Enable streaming if callback provided
     }
@@ -117,34 +171,11 @@ def call_claude_api(prompt, messages, model_id, system_prompt=None, stream_callb
         if stream_callback:
             # Streaming mode using REST API directly
             payload["stream"] = True
-            full_response = ""
-            
+
             response = requests.post(url, json=payload, headers=headers, stream=True)
-            
+
             if response.status_code == 200:
-                for line in response.iter_lines():
-                    if line:
-                        line_text = line.decode('utf-8')
-                        if line_text.startswith('data: '):
-                            json_str = line_text[6:]  # Remove 'data: ' prefix
-                            # Skip if this is a ping or message_stop event
-                            if json_str.strip() in ['[DONE]', '']:
-                                continue
-                            try:
-                                chunk_data = json.loads(json_str)
-                                # Handle different event types from Claude's SSE stream
-                                event_type = chunk_data.get('type')
-                                
-                                if event_type == 'content_block_delta':
-                                    delta = chunk_data.get('delta', {})
-                                    if delta.get('type') == 'text_delta':
-                                        text = delta.get('text', '')
-                                        if text:
-                                            full_response += text
-                                            stream_callback(text)
-                            except json.JSONDecodeError:
-                                continue
-                return full_response
+                return _iter_sse_stream(response, stream_callback)
             else:
                 return f"Error: API returned status {response.status_code}: {response.text}"
         else:
@@ -246,7 +277,7 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
     try:
         headers = {
             "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            "HTTP-Referer": "http://localhost:3000",
+            "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "https://github.com/qrcode1337/liminal_backrooms"),
             "Content-Type": "application/json",
             "X-Title": "AI Conversation"  # Adding title for OpenRouter tracking
         }
@@ -367,10 +398,10 @@ def call_openrouter_api(prompt, conversation_history, model, system_prompt, stre
                 "model": openrouter_model,
                 "messages": msgs,
                 "temperature": temperature,  # Use AI's custom temperature
-                "max_tokens": 8000,
+                "max_tokens": API_MAX_TOKENS,
                 "stream": stream_callback is not None
             }
-            
+
             print(f"\nSending to OpenRouter:")
             print(f"Model: {model}")
             print(f"Temperature: {temperature}")
@@ -549,7 +580,8 @@ def call_replicate_api(prompt, conversation_history, model, gui=None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         image_path = image_dir / f"generated_{timestamp}.jpg"
         
-        response = requests.get(image_url)
+        response = requests.get(image_url, timeout=30)
+        response.raise_for_status()
         with open(image_path, "wb") as f:
             f.write(response.content)
         
@@ -604,7 +636,7 @@ def call_deepseek_api(prompt, conversation_history, model, system_prompt, stream
         payload = {
             "model": "deepseek/deepseek-r1",
             "messages": messages,
-            "max_tokens": 8000,
+            "max_tokens": API_MAX_TOKENS,
             "temperature": 1,
             "stream": stream_callback is not None
         }
@@ -622,27 +654,9 @@ def call_deepseek_api(prompt, conversation_history, model, system_prompt, stream
                 timeout=180,
                 stream=True
             )
-            
+
             if response.status_code == 200:
-                full_response = ""
-                for line in response.iter_lines():
-                    if line:
-                        line_text = line.decode('utf-8')
-                        if line_text.startswith('data: '):
-                            json_str = line_text[6:]
-                            if json_str.strip() == '[DONE]':
-                                break
-                            try:
-                                chunk_data = json.loads(json_str)
-                                if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
-                                    delta = chunk_data['choices'][0].get('delta', {})
-                                    content = delta.get('content', '')
-                                    if content:
-                                        full_response += content
-                                        stream_callback(content)
-                            except json.JSONDecodeError:
-                                continue
-                response_text = full_response
+                response_text = _iter_sse_stream(response, stream_callback)
             else:
                 error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
                 print(error_msg)
@@ -658,12 +672,17 @@ def call_deepseek_api(prompt, conversation_history, model, system_prompt, stream
             
             if response.status_code == 200:
                 data = response.json()
-                response_text = data['choices'][0]['message']['content']
+                choices = data.get('choices', [])
+                if choices and choices[0].get('message'):
+                    response_text = choices[0]['message'].get('content', '')
+                else:
+                    print(f"[DeepSeek] Unexpected response structure: {list(data.keys())}")
+                    return None
             else:
                 error_msg = f"OpenRouter API error {response.status_code}: {response.text}"
                 print(error_msg)
                 return None
-        
+
         print(f"\nRaw Response: {response_text[:500]}...")
         
         # Initialize result with content
@@ -867,7 +886,7 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
         payload = {
             "model": model,
             "messages": messages,
-            "max_tokens": 500,
+            "max_tokens": API_MAX_TOKENS_SMALL,
             "temperature": 0.9,
             "top_p": 0.95,
         }
@@ -880,7 +899,11 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
         
         if response.status_code == 200:
             response_data = response.json()
-            return response_data['choices'][0]['message']['content']
+            choices = response_data.get('choices', [])
+            if choices and choices[0].get('message'):
+                return choices[0]['message'].get('content', '')
+            print(f"[Together] Unexpected response structure: {list(response_data.keys())}")
+            return None
         else:
             print(f"Together API Error Status: {response.status_code}")
             print(f"Response Body: {response.text[:500]}..." if len(response.text) > 500 else f"Response Body: {response.text}")
@@ -890,27 +913,12 @@ def call_together_api(prompt, conversation_history, model, system_prompt):
         print(f"Error calling Together API: {str(e)}")
         return None
 
-def read_shared_html(*args, **kwargs):
-    return ""
-
-def update_shared_html(*args, **kwargs):
-    return False
-
 def open_html_in_browser(file_path=None):
     import webbrowser
     if file_path is None:
         file_path = os.path.join(OUTPUTS_DIR, "conversation_full.html")
     full_path = os.path.abspath(file_path)
     webbrowser.open('file://' + full_path)
-
-def create_initial_living_document(*args, **kwargs):
-    return ""
-
-def read_living_document(*args, **kwargs):
-    return ""
-
-def process_living_document_edits(result, model_name):
-    return result
 
 def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
     """Generate an image based on text using OpenRouter's image generation API"""
@@ -937,7 +945,7 @@ def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
                 }
             ],
             "modalities": ["image", "text"],
-            "max_tokens": 1024  # Limit tokens for image generation to avoid credit issues
+            "max_tokens": IMAGE_GEN_MAX_TOKENS
         }
         
         print(f"Generating image with {model}...")
