@@ -141,9 +141,9 @@ def get_available_ids() -> set | None:
                 cache_data = json.load(f)
             print("[ModelUpdater] Using stale cache")
             return set(cache_data.get("model_ids", []))
-        except:
-            pass
-    
+        except Exception as e:
+            print(f"[ModelUpdater] Failed to read stale cache: {e}")
+
     return None
 
 

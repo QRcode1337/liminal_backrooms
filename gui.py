@@ -41,7 +41,7 @@ from config import (
 from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
 
 # Import shared utilities - with fallback for open_html_in_browser
-from shared_utils import generate_image_from_text
+from shared_utils import generate_image_from_text, get_visible_messages
 try:
     from shared_utils import open_html_in_browser
 except ImportError:
@@ -2605,13 +2605,15 @@ class ImagePreviewPane(QWidget):
     def open_images_folder(self):
         """Open the images folder in file explorer"""
         import subprocess
+        import sys
         images_dir = os.path.join(os.path.dirname(__file__), 'images')
-        if os.path.exists(images_dir):
-            subprocess.Popen(f'explorer "{images_dir}"')
+        os.makedirs(images_dir, exist_ok=True)
+        if sys.platform == 'win32':
+            subprocess.Popen(['explorer', images_dir])
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', images_dir])
         else:
-            # Try to create it
-            os.makedirs(images_dir, exist_ok=True)
-            subprocess.Popen(f'explorer "{images_dir}"')
+            subprocess.Popen(['xdg-open', images_dir])
     
     def resizeEvent(self, event):
         """Re-scale image when pane is resized"""
@@ -2928,13 +2930,15 @@ class VideoPreviewPane(QWidget):
     def open_videos_folder(self):
         """Open the videos folder in file explorer"""
         import subprocess
+        import sys
         videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
-        if os.path.exists(videos_dir):
-            subprocess.Popen(f'explorer "{videos_dir}"')
+        os.makedirs(videos_dir, exist_ok=True)
+        if sys.platform == 'win32':
+            subprocess.Popen(['explorer', videos_dir])
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', videos_dir])
         else:
-            # Try to create it
-            os.makedirs(videos_dir, exist_ok=True)
-            subprocess.Popen(f'explorer "{videos_dir}"')
+            subprocess.Popen(['xdg-open', videos_dir])
 
 
 class StatsWidget(QWidget):
@@ -3950,13 +3954,12 @@ class ConversationContextMenu(QMenu):
         self.fork_action = QAction("🔱 Fork", self)
         
         # Add actions to menu
-        # NOTE: Fork/Rabbithole temporarily disabled - needs rebuild
-        # self.addAction(self.rabbithole_action)
-        # self.addAction(self.fork_action)
-        
+        self.addAction(self.rabbithole_action)
+        self.addAction(self.fork_action)
+
         # Connect actions to signals
-        # self.rabbithole_action.triggered.connect(self.on_rabbithole_selected)
-        # self.fork_action.triggered.connect(self.on_fork_selected)
+        self.rabbithole_action.triggered.connect(self.on_rabbithole_selected)
+        self.fork_action.triggered.connect(self.on_fork_selected)
         
         # Apply styling
         self.setStyleSheet("""
@@ -3974,20 +3977,27 @@ class ConversationContextMenu(QMenu):
         """)
     
     def on_rabbithole_selected(self):
-        """Signal that rabbithole action was selected
-        
-        NOTE: With widget-based chat, text selection requires different handling.
-        """
-        # TODO: Implement selection tracking across message widgets
-        pass
-    
+        """Signal that rabbithole action was selected."""
+        selected = self._get_selected_text()
+        if selected:
+            self.rabbitholeSelected.emit()
+
     def on_fork_selected(self):
-        """Signal that fork action was selected
-        
-        NOTE: With widget-based chat, text selection requires different handling.
-        """
-        # TODO: Implement selection tracking across message widgets
-        pass
+        """Signal that fork action was selected."""
+        selected = self._get_selected_text()
+        if selected:
+            self.forkSelected.emit()
+
+    @staticmethod
+    def _get_selected_text() -> str:
+        """Get selected text from the currently focused message widget."""
+        from PyQt6.QtWidgets import QApplication
+        widget = QApplication.focusWidget()
+        if widget and hasattr(widget, 'textCursor'):
+            cursor = widget.textCursor()
+            if cursor.hasSelection():
+                return cursor.selectedText()
+        return ""
 
 class ConversationPane(QWidget):
     """Left pane containing the conversation and input area"""
@@ -5223,24 +5233,27 @@ body {{
         self.submit_button.setText(f"Processing{patterns[self.loading_dots]}")
     
     def show_context_menu(self, position):
-        """Show context menu at the given position
-        
-        NOTE: With widget-based chat, text selection works within individual messages.
-        Context menu is disabled until we implement cross-message selection.
-        """
-        # Widget-based chat doesn't have a global textCursor
-        # TODO: Implement selection tracking across message widgets
-        pass
-    
+        """Show context menu at the given position."""
+        from PyQt6.QtWidgets import QApplication
+        widget = QApplication.focusWidget()
+        if widget and hasattr(widget, 'textCursor'):
+            cursor = widget.textCursor()
+            if cursor.hasSelection():
+                self.context_menu.exec(widget.mapToGlobal(position))
+
     def rabbithole_from_selection(self):
-        """Create a rabbithole branch from selected text"""
-        # TODO: Get selected text from the focused message widget
-        pass
-    
+        """Create a rabbithole branch from selected text."""
+        from gui import ConversationContextMenu
+        text = ConversationContextMenu._get_selected_text()
+        if text:
+            self.context_menu.rabbitholeSelected.emit()
+
     def fork_from_selection(self):
-        """Create a fork branch from selected text"""
-        # TODO: Get selected text from the focused message widget
-        pass
+        """Create a fork branch from selected text."""
+        from gui import ConversationContextMenu
+        text = ConversationContextMenu._get_selected_text()
+        if text:
+            self.context_menu.forkSelected.emit()
     
     def append_text(self, text, format_type="normal", ai_name=None):
         """Append text to a message widget (for streaming).
@@ -6125,8 +6138,15 @@ class LiminalBackroomsApp(QMainWindow):
                     f"🌀 BackroomsBench complete! {result['summary']['successful_evaluations']}/3 judges filed reports"
                 )
                 import subprocess
+                import sys as _sys
                 try:
-                    subprocess.Popen(f'explorer "{result["output_dir"]}"')
+                    output_dir = result["output_dir"]
+                    if _sys.platform == 'win32':
+                        subprocess.Popen(['explorer', output_dir])
+                    elif _sys.platform == 'darwin':
+                        subprocess.Popen(['open', output_dir])
+                    else:
+                        subprocess.Popen(['xdg-open', output_dir])
                 except Exception:
                     pass
                 self._backroomsbench_result = None
@@ -6416,7 +6436,7 @@ class LiminalBackroomsApp(QMainWindow):
             conversation = branch_data['conversation']
             
             # Filter hidden messages for display
-            visible_conversation = [msg for msg in conversation if not msg.get('hidden', False)]
+            visible_conversation = get_visible_messages(conversation)
             self.left_pane.display_conversation(visible_conversation, branch_data)
 
     def initialize_selectors(self):
