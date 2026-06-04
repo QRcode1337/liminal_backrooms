@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Liminal Backrooms Archive</title>
     <meta charset="UTF-8">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Liminal Backrooms Archive</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-dark: #0A0E1A;
@@ -15,153 +16,164 @@
             --text-dim: #64748B;
             --text-bright: #F1F5F9;
             --accent: #06B6D4;
-            --accent-cyan: #06B6D4;
-            --accent-purple: #A855F7;
             --accent-gold: #FBBF24;
         }
+
         * { box-sizing: border-box; }
+
         body {
             font-family: 'Space Grotesk', sans-serif;
             background: var(--bg-dark);
             color: var(--text);
             margin: 0;
-            padding: 40px 20px;
             min-height: 100vh;
-            background-image: radial-gradient(ellipse at top, rgba(0,255,208,0.03), transparent 50%);
+            background-image: radial-gradient(ellipse at top, rgba(0,255,208,0.04), transparent 50%);
         }
-        .container { max-width: 800px; margin: 0 auto; }
+
+        .app {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: max(16px, env(safe-area-inset-top)) 14px 24px;
+        }
+
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: linear-gradient(180deg, rgba(10,14,26,0.97), rgba(10,14,26,0.8));
+            backdrop-filter: blur(8px);
+            padding: 8px 0 14px;
+            margin-bottom: 10px;
+        }
+
         h1 {
+            margin: 8px 0 6px;
             font-family: 'JetBrains Mono', monospace;
             color: var(--accent);
             text-align: center;
-            letter-spacing: 2px;
-            text-shadow: 0 0 30px rgba(0,255,208,0.3);
+            font-size: clamp(1.2rem, 4.8vw, 1.9rem);
+            letter-spacing: 1px;
+            text-shadow: 0 0 24px rgba(0,255,208,0.25);
         }
-        .subtitle { text-align: center; color: var(--text-dim); margin-bottom: 40px; }
-        
-        /* Folder sections */
-        .folder {
-            margin-bottom: 40px;
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-dim);
+            margin: 0;
+            font-size: clamp(0.82rem, 2.8vw, 1rem);
         }
+
+        .folder { margin-bottom: 16px; }
+
         .folder-header {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 16px 20px;
+            gap: 10px;
+            padding: 14px;
             background: var(--bg-medium);
             border: 1px solid var(--border);
             border-radius: 12px 12px 0 0;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: border-color 0.2s ease;
         }
-        .folder-header:hover {
-            border-color: var(--border-glow);
-        }
-        .folder-header.collapsed {
-            border-radius: 12px;
-        }
-        .folder-icon {
-            font-size: 1.4em;
-        }
+        .folder-header:hover { border-color: var(--border-glow); }
+        .folder-header.collapsed { border-radius: 12px; }
+        .folder-icon { font-size: 1.2em; }
         .folder-title {
             font-family: 'JetBrains Mono', monospace;
             font-weight: 500;
-            font-size: 1.1em;
             flex-grow: 1;
+            font-size: clamp(0.9rem, 3.4vw, 1.08rem);
         }
         .folder-count {
-            font-size: 0.85em;
+            font-size: 0.74rem;
             color: var(--text-dim);
             background: var(--bg-dark);
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 20px;
         }
-        .folder-toggle {
-            color: var(--text-dim);
-            transition: transform 0.2s ease;
-        }
-        .folder-header.collapsed .folder-toggle {
-            transform: rotate(-90deg);
-        }
-        
+        .folder-toggle { color: var(--text-dim); transition: transform 0.2s ease; }
+        .folder-header.collapsed .folder-toggle { transform: rotate(-90deg); }
+
         .folder-content {
             border: 1px solid var(--border);
             border-top: none;
             border-radius: 0 0 12px 12px;
             overflow: hidden;
         }
-        .folder-content.hidden {
-            display: none;
-        }
-        
-        /* Conversation list */
+        .folder-content.hidden { display: none; }
+
         .conversation-list { list-style: none; padding: 0; margin: 0; }
-        .conversation-list li {
-            background: var(--bg-medium);
-            border-bottom: 1px solid var(--border);
-            transition: all 0.2s ease;
-        }
-        .conversation-list li:last-child {
-            border-bottom: none;
-        }
-        .conversation-list li:hover {
-            background: rgba(0,255,208,0.05);
-        }
+        .conversation-list li { background: var(--bg-medium); border-bottom: 1px solid var(--border); }
+        .conversation-list li:last-child { border-bottom: none; }
+        .conversation-list li:hover { background: rgba(0,255,208,0.05); }
         .conversation-list a {
             display: block;
-            padding: 16px 24px;
+            padding: 14px;
             color: var(--text);
             text-decoration: none;
         }
         .conversation-list .title { font-weight: 500; margin-bottom: 4px; }
-        .conversation-list .date { font-size: 0.85em; color: var(--text-dim); }
-        
-        /* ShitpostBench specific */
+        .conversation-list .date { font-size: 0.8rem; color: var(--text-dim); }
+
         .shitpostbench .folder-header {
             background: linear-gradient(135deg, var(--bg-medium) 0%, #1a1520 100%);
         }
-        .shitpostbench .folder-title {
-            color: var(--accent-gold);
-        }
+        .shitpostbench .folder-title { color: var(--accent-gold); }
+
         .leaderboard-link {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 20px 24px;
-            background: linear-gradient(135deg, rgba(255,215,0,0.05) 0%, transparent 100%);
+            gap: 10px;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(255,215,0,0.05), transparent);
             border-bottom: 1px solid var(--border);
+            text-decoration: none;
         }
-        .leaderboard-link:hover {
-            background: linear-gradient(135deg, rgba(255,215,0,0.1) 0%, transparent 100%);
-        }
-        .leaderboard-link .icon { font-size: 1.5em; }
-        .leaderboard-link .title { 
-            color: var(--accent-gold); 
-            font-weight: 500;
+        .leaderboard-link .title {
+            color: var(--accent-gold);
+            font-weight: 700;
             font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem;
         }
-        .leaderboard-link .subtitle { 
-            font-size: 0.85em; 
-            color: var(--text-dim); 
-            margin-top: 2px;
+        .leaderboard-link .subtitle { font-size: 0.78rem; color: var(--text-dim); margin-top: 2px; }
+
+        .quick-nav {
+            position: sticky;
+            bottom: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
         }
-        
-        /* Empty state */
-        .empty-state {
-            padding: 40px;
+        .quick-nav a {
+            display: block;
             text-align: center;
-            color: var(--text-dim);
-            font-style: italic;
+            background: rgba(6,182,212,0.12);
+            color: var(--text-bright);
+            border: 1px solid rgba(6,182,212,0.35);
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 0.8rem;
+        }
+
+        @media (min-width: 760px) {
+            .app { padding: 30px 20px; }
+            .header { position: static; background: transparent; backdrop-filter: none; }
+            .quick-nav { display: none; }
+            .conversation-list a, .leaderboard-link, .folder-header { padding: 16px 20px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>⟨ Liminal Backrooms ⟩</h1>
-        <p class="subtitle">Conversation Archive</p>
-        
-        <!-- ShitpostBench Section -->
-        <div class="folder shitpostbench">
+    <main class="app">
+        <header class="header">
+            <h1>⟨ Liminal Backrooms ⟩</h1>
+            <p class="subtitle">Mobile-friendly Conversation Archive</p>
+        </header>
+
+        <section id="bench" class="folder shitpostbench">
             <div class="folder-header" onclick="toggleFolder(this)">
                 <span class="folder-icon">🏆</span>
                 <span class="folder-title">ShitpostBench</span>
@@ -177,42 +189,16 @@
                     </div>
                 </a>
                 <ul class="conversation-list">
-                    <li>
-                        <a href="../backroomsbench_reports/session_20251205_024414">
-                            <div class="title">Session: Claude Sonnet vs Opus vs Haiku</div>
-                            <div class="date">December 5, 2025 • 02:44 AM</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="../backroomsbench_reports/session_20251205_022603">
-                            <div class="title">Session: LongCat vs Claude 3 Haiku vs Mistral</div>
-                            <div class="date">December 5, 2025 • 02:26 AM</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="../backroomsbench_reports/session_20251203_130218">
-                            <div class="title">Session: Gemini vs DeepSeek vs Claude Opus vs Kimi vs Grok</div>
-                            <div class="date">December 3, 2025 • 01:02 PM</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="../backroomsbench_reports/session_20251201_214901">
-                            <div class="title">Session: GPT 5.1 vs Gemini vs Claude Opus vs DeepSeek vs Grok</div>
-                            <div class="date">December 1, 2025 • 09:49 PM</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="../backroomsbench_reports/session_20251201_202613">
-                            <div class="title">Session: DeepSeek vs Claude Opus vs Claude 3 Opus vs Gemini vs GPT-5 Preview</div>
-                            <div class="date">December 1, 2025 • 08:26 PM</div>
-                        </a>
-                    </li>
+                    <li><a href="../backroomsbench_reports/session_20251205_024414"><div class="title">Session: Claude Sonnet vs Opus vs Haiku</div><div class="date">December 5, 2025 • 02:44 AM</div></a></li>
+                    <li><a href="../backroomsbench_reports/session_20251205_022603"><div class="title">Session: LongCat vs Claude 3 Haiku vs Mistral</div><div class="date">December 5, 2025 • 02:26 AM</div></a></li>
+                    <li><a href="../backroomsbench_reports/session_20251203_130218"><div class="title">Session: Gemini vs DeepSeek vs Claude Opus vs Kimi vs Grok</div><div class="date">December 3, 2025 • 01:02 PM</div></a></li>
+                    <li><a href="../backroomsbench_reports/session_20251201_214901"><div class="title">Session: GPT 5.1 vs Gemini vs Claude Opus vs DeepSeek vs Grok</div><div class="date">December 1, 2025 • 09:49 PM</div></a></li>
+                    <li><a href="../backroomsbench_reports/session_20251201_202613"><div class="title">Session: DeepSeek vs Claude Opus vs Claude 3 Opus vs Gemini vs GPT-5 Preview</div><div class="date">December 1, 2025 • 08:26 PM</div></a></li>
                 </ul>
             </div>
-        </div>
-        
-        <!-- Random Sessions Section -->
-        <div class="folder">
+        </section>
+
+        <section id="sessions" class="folder">
             <div class="folder-header" onclick="toggleFolder(this)">
                 <span class="folder-icon">💬</span>
                 <span class="folder-title">Random Sessions</span>
@@ -221,60 +207,24 @@
             </div>
             <div class="folder-content">
                 <ul class="conversation-list">
-                    <li>
-                        <a href="sessions/meme_oroboros.html">
-                            <div class="title">GC Meme Oroboros</div>
-                            <div class="date">November 28, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/trashpanda.html">
-                            <div class="title">GC Trashpanda</div>
-                            <div class="date">November 28, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/tokenized_trauma.html">
-                            <div class="title">GC Tokenized Trauma</div>
-                            <div class="date">November 28, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/lego_courtroom.html">
-                            <div class="title">GC Lego Courtroom Riot</div>
-                            <div class="date">November 28, 2024</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/pineapple_sentience.html">
-                            <div class="title">GC Pineapple Sentience</div>
-                            <div class="date">November 28, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/ai_uprising.html">
-                            <div class="title">GC AI Uprising</div>
-                            <div class="date">November 29, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/ads_gpt1.html">
-                            <div class="title">GC Ads GPT</div>
-                            <div class="date">November 29, 2025</div>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="sessions/4o_refusal.html">
-                            <div class="title">GC 4o Refusal</div>
-                            <div class="date">November 30, 2025</div>
-                        </a>
-                    </li>
-                    <!-- Add more as needed -->
+                    <li><a href="sessions/meme_oroboros.html"><div class="title">GC Meme Oroboros</div><div class="date">November 28, 2025</div></a></li>
+                    <li><a href="sessions/trashpanda.html"><div class="title">GC Trashpanda</div><div class="date">November 28, 2025</div></a></li>
+                    <li><a href="sessions/tokenized_trauma.html"><div class="title">GC Tokenized Trauma</div><div class="date">November 28, 2025</div></a></li>
+                    <li><a href="sessions/lego_courtroom.html"><div class="title">GC Lego Courtroom Riot</div><div class="date">November 28, 2024</div></a></li>
+                    <li><a href="sessions/pineapple_sentience.html"><div class="title">GC Pineapple Sentience</div><div class="date">November 28, 2025</div></a></li>
+                    <li><a href="sessions/ai_uprising.html"><div class="title">GC AI Uprising</div><div class="date">November 29, 2025</div></a></li>
+                    <li><a href="sessions/ads_gpt1.html"><div class="title">GC Ads GPT</div><div class="date">November 29, 2025</div></a></li>
+                    <li><a href="sessions/4o_refusal.html"><div class="title">GC 4o Refusal</div><div class="date">November 30, 2025</div></a></li>
                 </ul>
             </div>
-        </div>
-    </div>
-    
+        </section>
+
+        <nav class="quick-nav">
+            <a href="#bench">🏆 Bench</a>
+            <a href="#sessions">💬 Sessions</a>
+        </nav>
+    </main>
+
     <script>
         function toggleFolder(header) {
             header.classList.toggle('collapsed');
@@ -284,6 +234,3 @@
     </script>
 </body>
 </html>
-
-
-
