@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+cd "$ROOT"
+export TOGETHER_NO_BANNER=1
+export PYTHONUNBUFFERED=1
+PYTHON="$ROOT/.runtime-venv/bin/python"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="$ROOT/.venv/bin/python"
+fi
+# Do not exec: LaunchServices keeps this bundle process for Dock name/icon.
+"$PYTHON" -u "$ROOT/main.py"
