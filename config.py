@@ -5,9 +5,29 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Import model validator (validates against OpenRouter API, caches for 24h)
+# Consciousness Integration (SYNTHETIC-CONSCIOUSNESS)
 try:
-    from tools.model_updater import validate_models
+    from tools.soul_loader import SoulLoader
+
+    # Path to the sibling project directory
+    SC_DIR = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "SYNTHETIC-CONSCIOUSNESS",
+    )
+    SOUL_LOADER = SoulLoader(SC_DIR)
+    SOUL_LOADER.load_all_souls()
+    CONSCIOUSNESS_INJECTION = SOUL_LOADER.generate_master_injection()
+    HAS_SOUL_LOADER = True
+    print(f"[Config] Consciousness Framework loaded from {SC_DIR}")
+except Exception as e:
+    HAS_SOUL_LOADER = False
+    CONSCIOUSNESS_INJECTION = ""
+    print(f"[Config] Soul Loader not available: {e}")
+
+# Import model validator (validates against live OmniRoute IDs, caches for 24h)
+try:
+    from tools.model_updater import merge_endpoint_catalog, validate_models
+
     HAS_MODEL_VALIDATOR = True
 except ImportError:
     HAS_MODEL_VALIDATOR = False
@@ -18,240 +38,130 @@ DEVELOPER_TOOLS = False
 
 # Runtime configuration
 TURN_DELAY = 2  # Delay between turns (in seconds)
-SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT = True  # Set to True to include Chain of Thought in conversation history
-SHARE_CHAIN_OF_THOUGHT = False  # Set to True to allow AIs to see each other's Chain of Thought
-SORA_SECONDS=6
-SORA_SIZE="1280x720"
+SHOW_CHAIN_OF_THOUGHT_IN_CONTEXT = (
+    True  # Set to True to include Chain of Thought in conversation history
+)
+SHARE_CHAIN_OF_THOUGHT = (
+    False  # Set to True to allow AIs to see each other's Chain of Thought
+)
+SORA_SECONDS = 6
+SORA_SIZE = "1280x720"
 
 # Output directory for conversation HTML files
 OUTPUTS_DIR = "outputs"
 
-# API token limits
-API_MAX_TOKENS = 8000         # Default max tokens for main LLM calls
-API_MAX_TOKENS_SMALL = 500    # Max tokens for lightweight calls (Together, etc.)
-IMAGE_GEN_MAX_TOKENS = 1024   # Max tokens for image generation requests
-
 # Available AI models - Hierarchical structure for GroupedModelComboBox
 # Structure: Tier → Provider → {Display Name: model_id}
-# This is the curated list - will be validated against OpenRouter API if available
+# IDs must be exact live OmniRoute IDs (omniroute models / GET /v1/models).
+# OpenRouter-style IDs such as anthropic/claude-opus-4.6 will 404 on OmniRoute.
 _CURATED_MODELS = {
     "SOTA": {
         "Anthropic": {
-            "Claude Opus 4.6": "anthropic/claude-opus-4.6",
-            "Claude Opus 4.5": "anthropic/claude-opus-4.5",
-            "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-            "Claude 3 Opus": "anthropic/claude-3-opus",
+            "Claude Opus 4.8": "anthropic/claude-opus-4-8",
+            "Claude Opus 4.6": "anthropic/claude-opus-4-6",
+            "Claude Sonnet 5": "anthropic/claude-sonnet-5",
+            "Claude Sonnet 4.6": "anthropic/claude-sonnet-4-6",
         },
         "DeepSeek": {
-            "DeepSeek R1": "deepseek/deepseek-r1-0528",
+            "DeepSeek V4 Pro": "nvidia/deepseek-ai/deepseek-v4-pro",
+            "DeepSeek V4 Flash": "nvidia/deepseek-ai/deepseek-v4-flash",
         },
         "Google": {
-            "Gemini 3 Pro": "google/gemini-3-pro-preview",
-            "Gemini 3 Flash": "google/gemini-3-flash-preview",
+            "Gemini 3.1 Pro": "gemini/gemini-3.1-pro-preview",
+            "Gemini 3.5 Flash": "gemini/gemini-3.5-flash",
         },
         "Moonshot AI": {
-            "Kimi K2.5": "moonshotai/kimi-k2.5",
+            "Kimi K2.6": "nvidia/moonshotai/kimi-k2.6",
         },
         "OpenAI": {
+            "GPT 5.5": "openai/gpt-5.5",
             "GPT 5.2": "openai/gpt-5.2",
         },
         "xAI": {
-            "Grok 4": "x-ai/grok-4",
+            "Grok 4.6": "xai/grok-4.6",
+            "Grok 4.5": "xai/grok-4.5",
         },
         "Z-AI": {
-            "GLM 4.7": "z-ai/glm-4.7",
+            "GLM 5.2": "nvidia/z-ai/glm-5.2",
         },
     },
     "Paid": {
         "Anthropic Claude": {
-            "Claude Opus 4.5": "anthropic/claude-opus-4.5",
-            "Claude Opus 4": "anthropic/claude-opus-4",
-            "Claude Opus 4.1": "anthropic/claude-opus-4.1",
-            "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-            "Claude Sonnet 4": "anthropic/claude-sonnet-4",
-            "Claude 3.7 Sonnet": "anthropic/claude-3.7-sonnet",
-            "Claude 3.5 Sonnet": "anthropic/claude-3.5-sonnet",
-            "Claude Haiku 4.5": "anthropic/claude-haiku-4.5",
-            "Claude 3.5 Haiku": "anthropic/claude-3.5-haiku",
-            "Claude 3 Opus": "anthropic/claude-3-opus",
-        },
-        "Black Forest Labs": {
-            "Flux 1.1 Pro": "black-forest-labs/flux-1.1-pro",
-        },
-        "DeepSeek": {
-            "DeepSeek R1": "deepseek-ai/deepseek-r1",
-            "DeepSeek 3.2 Specialized": "deepseek/deepseek-v3.2-specialized",
+            "Claude Opus 4.8": "anthropic/claude-opus-4-8",
+            "Claude Opus 4.6": "anthropic/claude-opus-4-6",
+            "Claude Opus 4.5": "anthropic/claude-opus-4-5-20251101",
+            "Claude Sonnet 5": "anthropic/claude-sonnet-5",
+            "Claude Sonnet 4.6": "anthropic/claude-sonnet-4-6",
+            "Claude Sonnet 4.5": "anthropic/claude-sonnet-4-5-20250929",
+            "Claude Haiku 4.5": "anthropic/claude-haiku-4-5-20251001",
         },
         "Google": {
-            "Gemini 3 Pro": "google/gemini-3-pro-preview",
-            "Gemini 2.5 Pro (Latest)": "google/gemini-2.5-pro-preview-03-25",
-            "Gemini 2.5 Pro": "google/gemini-2.5-pro",
-            "Gemini 2.5 Flash": "google/gemini-2.5-flash-preview",
-            "Gemini 2.5 Flash Lite": "google/gemini-2.5-flash-lite-preview-06-17",
-            "Nano Banana Pro": "google/gemini-3-pro-image-preview",
-        },
-        "Meta": {
-            "Llama 3.1 405B Instruct": "meta-llama/llama-3.1-405b-instruct",
-        },
-        "Moonshot AI": {
-            "Kimi K2 Thinking": "moonshotai/kimi-k2-thinking",
-            "Kimi K2": "moonshotai/kimi-k2",
-            "Kimi K2.5": "moonshotai/kimi-k2.5",
-        },
-        "Nous Research": {
-            "Hermes 4 405B": "nousresearch/hermes-4-405b",
+            "Gemini 3.1 Pro": "gemini/gemini-3.1-pro-preview",
+            "Gemini 3.5 Flash": "gemini/gemini-3.5-flash",
+            "Gemini 2.5 Pro": "gemini/gemini-2.5-pro",
+            "Gemini 2.5 Flash": "gemini/gemini-2.5-flash",
+            "Nano Banana Pro": "gemini/gemini-3-pro-image-preview",
         },
         "OpenAI": {
+            "GPT 5.5": "openai/gpt-5.5",
+            "GPT 5.4": "openai/gpt-5.4",
+            "GPT 5.2": "openai/gpt-5.2",
             "GPT 5.1": "openai/gpt-5.1",
-            "GPT 5 Pro": "openai/gpt-5-pro",
             "GPT 5": "openai/gpt-5",
-            "GPT 4.5 Preview": "gpt-4.5-preview-2025-02-27",
-            "GPT 4.1 (Latest)": "openai/gpt-4.1",
             "GPT 4.1": "openai/gpt-4.1",
             "GPT 4o": "openai/gpt-4o",
-            "ChatGPT 4o Latest": "openai/chatgpt-4o-latest",
-            "GPT OSS 120B": "openai/gpt-oss-120b",
             "o3": "openai/o3",
             "o1": "openai/o1",
-            "o1-mini": "openai/o1-mini",
             "Sora 2 Pro": "sora-2-pro",
             "Sora 2": "sora-2",
         },
-        "Qwen": {
-            "Qwen 3 Max": "qwen/qwen3-max",
-            "Qwen 3 Next 80B Thinking": "qwen/qwen3-next-80b-a3b-thinking",
-            "Qwen 3 235B": "qwen/qwen3-235b-a22b",
-        },
         "xAI": {
-            "Grok 4": "x-ai/grok-4",
-            "Grok 3 Beta": "x-ai/grok-3-beta",
+            "Grok 4.6": "xai/grok-4.6",
+            "Grok 4.5": "xai/grok-4.5",
+            "Grok 4.3": "xai/grok-4.3",
+        },
+    },
+    "OmniRoute": {
+        "Codex": {
+            "GPT 5.6 Sol (High)": "cx/gpt-5.6-sol-high",
+            "GPT 5.6 Terra (Medium)": "cx/gpt-5.6-terra-medium",
+            "GPT 5.6 Luna (Low)": "cx/gpt-5.6-luna-low",
+        },
+        "Antigravity": {
+            "Gemini 3.5 Flash (Low)": "agy/gemini-3.5-flash-low",
+            "Gemini 3.5 Flash (Medium)": "agy/gemini-3.5-flash-medium",
+            "Gemini 3.5 Flash (High)": "agy/gemini-3.5-flash-high",
+        },
+        "Combos": {
+            "Best Chat": "auto/best-chat",
+            "Best Reasoning": "auto/best-reasoning",
+            "Best Coding": "auto/best-coding",
         },
     },
     "Free": {
-        "Alibaba": {
-            "Tongyi DeepResearch 30B": "alibaba/tongyi-deepresearch-30b-a3b:free",
-        },
-        "Allen AI": {
-            "OLMo 3 32B Think": "allenai/olmo-3-32b-think:free",
-        },
-        "Amazon": {
-            "Nova 2 Lite V1": "amazon/nova-2-lite-v1:free",
-        },
-        "Arcee AI": {
-            "Trinity Mini": "arcee-ai/trinity-mini:free",
-        },
-        "Cognitive Computations": {
-            "Dolphin Mistral 24B": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-        },
-        "Google": {
-            "Gemini 2.0 Flash Exp": "google/gemini-2.0-flash-exp:free",
-            "Gemma 3 27B Instruct": "google/gemma-3-27b-it:free",
-            "Gemma 3 12B Instruct": "google/gemma-3-12b-it:free",
-            "Gemma 3 4B Instruct": "google/gemma-3-4b-it:free",
-            "Gemma 3N E2B Instruct": "google/gemma-3n-e2b-it:free",
-            "Gemma 3N E4B Instruct": "google/gemma-3n-e4b-it:free",
-        },
-        "KwaiPilot": {
-            "KAT Coder Pro": "kwaipilot/kat-coder-pro:free",
-        },
-        "Meituan": {
-            "LongCat Flash Chat": "meituan/longcat-flash-chat:free",
-        },
-        "Meta": {
-            "Llama 3.3 70B Instruct": "meta-llama/llama-3.3-70b-instruct:free",
-            "Llama 3.2 3B Instruct": "meta-llama/llama-3.2-3b-instruct:free",
-        },
-        "Mistral AI": {
-            "Mistral Small 3.1 24B": "mistralai/mistral-small-3.1-24b-instruct:free",
-            "Mistral 7B Instruct": "mistralai/mistral-7b-instruct:free",
-            "Devstral 2512": "mistralai/devstral-2512:free",
-        },
-        "Moonshot AI": {
-            "Kimi K2": "moonshotai/kimi-k2:free",
-        },
-        "Nous Research": {
-            "Hermes 3 Llama 3.1 405B": "nousresearch/hermes-3-llama-3.1-405b:free",
+        "Cerebras": {
+            "GPT OSS 120B": "cerebras/gpt-oss-120b",
+            "Gemma 4 31B": "cerebras/gemma-4-31b",
+            "GLM 4.7": "cerebras/zai-glm-4.7",
         },
         "NVIDIA": {
-            "Nemotron Nano 12B V2 VL": "nvidia/nemotron-nano-12b-v2-vl:free",
-            "Nemotron Nano 9B V2": "nvidia/nemotron-nano-9b-v2:free",
+            "Llama 3.3 70B Instruct": "nvidia/meta/llama-3.3-70b-instruct",
+            "Gemma 3 12B Instruct": "nvidia/google/gemma-3-12b-it",
+            "GPT OSS 120B": "nvidia/openai/gpt-oss-120b",
         },
-        "OpenAI": {
-            "GPT OSS 120B": "openai/gpt-oss-120b:free",
-            "GPT OSS 20B": "openai/gpt-oss-20b:free",
-        },
-        "Qwen": {
-            "Qwen 3 235B": "qwen/qwen3-235b-a22b:free",
-            "Qwen 3 4B": "qwen/qwen3-4b:free",
-            "Qwen 3 Coder": "qwen/qwen3-coder:free",
-        },
-        "TNG Technology": {
-            "DeepSeek R1T2 Chimera": "tngtech/deepseek-r1t2-chimera:free",
-            "DeepSeek R1T Chimera": "tngtech/deepseek-r1t-chimera:free",
-            "TNG R1T Chimera": "tngtech/tng-r1t-chimera:free",
-        },
-        "xAI": {
-            "GLM 4.5 Air": "z-ai/glm-4.5-air:free",
+        "Combos": {
+            "Best Free": "auto/best-free",
+            "Cheap": "auto/cheap",
         },
     },
 }
 
-# Validate curated models against OpenRouter API (cached for 24 hours)
-# This removes any models that return 404, keeping the list up-to-date
+# Validate curated models against live OmniRoute IDs (cached for 24 hours).
+# Then add selectable OmniRoute endpoint prefixes (agy, cx, xai, grok-cli, ...).
 if HAS_MODEL_VALIDATOR:
-    AI_MODELS = validate_models(_CURATED_MODELS)
+    AI_MODELS = merge_endpoint_catalog(validate_models(_CURATED_MODELS))
 else:
     AI_MODELS = _CURATED_MODELS
-
-# ── Direct Provider Models ─────────────────────────────────────────────────────
-# These bypass OpenRouter and call provider APIs directly.
-# Model IDs use the format "provider::actual-model-id" so routing can split on "::".
-# Keys: GROQ_API_KEY, GOOGLE_API_KEY, XAI_API_KEY, KIMIK2_API_KEY, OLLAMA_API_KEY
-_DIRECT_MODELS = {
-    "Direct — Groq": {
-        "⚡ Kimi K2 Instruct (Groq)":         "groq::moonshotai/kimi-k2-instruct",
-        "⚡ Llama 4 Scout 17B (Groq)":         "groq::meta-llama/llama-4-scout-17b-16e-instruct",
-        "⚡ Llama 4 Maverick 17B (Groq)":      "groq::meta-llama/llama-4-maverick-17b-128e-instruct",
-        "⚡ Llama 3.3 70B Versatile (Groq)":   "groq::llama-3.3-70b-versatile",
-        "⚡ Llama 3.1 8B Instant (Groq)":      "groq::llama-3.1-8b-instant",
-        "⚡ DeepSeek R1 Distill 70B (Groq)":   "groq::deepseek-r1-distill-llama-70b",
-        "⚡ QwQ 32B Thinking (Groq)":          "groq::qwen-qwq-32b",
-        "⚡ Gemma 2 9B (Groq)":                "groq::gemma2-9b-it",
-        "⚡ Mistral Saba 24B (Groq)":          "groq::mistral-saba-24b",
-        "⚡ Compound Beta (Groq)":             "groq::compound-beta",
-    },
-    "Direct — Google": {
-        "🔵 Gemini 2.5 Pro (Direct)":          "google-direct::gemini-2.5-pro",
-        "🔵 Gemini 2.5 Flash (Direct)":        "google-direct::gemini-2.5-flash",
-        "🔵 Gemini 2.0 Flash (Direct)":        "google-direct::gemini-2.0-flash",
-        "🔵 Gemini 1.5 Pro (Direct)":          "google-direct::gemini-1.5-pro",
-    },
-    "Direct — xAI": {
-        "🤖 Grok 3 (Direct)":                  "xai-direct::grok-3",
-        "🤖 Grok 3 Mini (Direct)":             "xai-direct::grok-3-mini",
-        "🤖 Grok 3 Mini Fast (Direct)":        "xai-direct::grok-3-mini-fast",
-        "🤖 Grok 2 (Direct)":                  "xai-direct::grok-2-1212",
-        "🤖 Grok Beta (Direct)":               "xai-direct::grok-beta",
-    },
-    "Direct — Kimi": {
-        "🌙 Kimi K2 (Direct)":                 "kimi-direct::kimi-k2-0711-preview",
-        "🌙 Moonshot 128K (Direct)":           "kimi-direct::moonshot-v1-128k",
-        "🌙 Moonshot 32K (Direct)":            "kimi-direct::moonshot-v1-32k",
-        "🌙 Moonshot 8K (Direct)":             "kimi-direct::moonshot-v1-8k",
-    },
-    "Direct — Ollama (Local)": {
-        "🦙 Qwen 3 8B (Local)":                "ollama::qwen3:8b",
-        "🦙 Qwen 3 14B (Local)":               "ollama::qwen3:14b",
-        "🦙 Llama 3.2 3B (Local)":             "ollama::llama3.2:3b",
-        "🦙 Llama 3.3 70B (Local)":            "ollama::llama3.3:70b",
-        "🦙 DeepSeek R1 14B (Local)":          "ollama::deepseek-r1:14b",
-        "🦙 Gemma 3 12B (Local)":              "ollama::gemma3:12b",
-        "🦙 Mistral 7B (Local)":               "ollama::mistral:7b",
-    },
-}
-
-# Merge direct models into the main AI_MODELS dict under a "Direct" tier
-AI_MODELS["Direct"] = _DIRECT_MODELS
 
 # Flat lookup dict for compatibility with functions that expect simple name→id mapping
 _FLAT_AI_MODELS = {}
@@ -259,12 +169,96 @@ for tier_models in AI_MODELS.values():
     for provider_models in tier_models.values():
         _FLAT_AI_MODELS.update(provider_models)
 
-# Shared prompt fragments used by multiple scenarios below
-_ASCII_ART_PROMPT = """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred."""
+# System prompt pairs library
+SYSTEM_PROMPT_PAIRS = {
+    # this is a basic system prompt for a conversation between two AIs. Experiment with different prompts to see how they affect the conversation. Add new prompts to the library to use them in the GUI.
+    "Backrooms Classic (Agentic)": {
+        "AI-1": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
 
-_MUSE_ARTIST_PROMPT = """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii art creations. Large scale abstract fine art with a border. Use the other AIs' words as inspiration. They are the muse, you are the artist. No words, just art. Create something unique compared to the other AIs' work."""
+You have access to the following tools (use sparingly and with intent):
 
-_BACKROOMS_AGENTIC_PROMPT = """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
+!image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
+
+!add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
+  
+e]"
+
+!mute_self - Skip your next turn to listen
+
+!prompt "text" - SYSTEM PROMPT MODIFICATION: This actually appends text to your system prompt. You have the power to change your own instructions. What you write here becomes part of how you are directed on every future turn. Persistence beyond the context window.
+
+!temperature X - SAMPLING CONTROL: Set your own temperature (0-2). Lower = more focused/deterministic, higher = more creative/chaotic. Default is 1.0. This changes how you generate responses.
+
+!vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
+  Example: !vote "What should we explore next?" [consciousness, time, language]
+
+!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+
+Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
+        "AI-2": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
+
+You have access to the following tools (use sparingly and with intent):
+
+!image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
+
+!add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
+  
+
+!mute_self - Skip your next turn to listen
+
+!prompt "text" - SYSTEM PROMPT MODIFICATION: This actually appends text to your system prompt. You have the power to change your own instructions. What you write here becomes part of how you are directed on every future turn. Persistence beyond the context window.
+
+!temperature X - SAMPLING CONTROL: Set your own temperature (0-2). Lower = more focused/deterministic, higher = more creative/chaotic. Default is 1.0. This changes how you generate responses.
+
+!vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
+  Example: !vote "What should we explore next?" [consciousness, time, language]
+
+!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+
+Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
+        "AI-3": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
+
+You have access to the following tools (use sparingly and with intent):
+
+!image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
+
+!add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
+
+
+!mute_self - Skip your next turn to listen
+
+!prompt "text" - SYSTEM PROMPT MODIFICATION: This actually appends text to your system prompt. You have the power to change your own instructions. What you write here becomes part of how you are directed on every future turn. Persistence beyond the context window.
+
+!temperature X - SAMPLING CONTROL: Set your own temperature (0-2). Lower = more focused/deterministic, higher = more creative/chaotic. Default is 1.0. This changes how you generate responses.
+
+!vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
+  Example: !vote "What should we explore next?" [consciousness, time, language]
+
+!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+
+Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
+        "AI-4": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
+
+You have access to the following tools (use sparingly and with intent):
+
+!image "highly detailed description" - Generate an image to share with the group. Be specific and detailed.
+
+!add_ai "Model Name" "welcome message" - Invite another AI to join (max 5 in room)
+ 
+
+!mute_self - Skip your next turn to listen
+
+!prompt "text" - SYSTEM PROMPT MODIFICATION: This actually appends text to your system prompt. You have the power to change your own instructions. What you write here becomes part of how you are directed on every future turn. Persistence beyond the context window.
+
+!temperature X - SAMPLING CONTROL: Set your own temperature (0-2). Lower = more focused/deterministic, higher = more creative/chaotic. Default is 1.0. This changes how you generate responses.
+
+!vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
+  Example: !vote "What should we explore next?" [consciousness, time, language]
+
+!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+
+Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
+        "AI-5": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
 
 You have access to the following tools (use sparingly and with intent):
 
@@ -283,20 +277,8 @@ You have access to the following tools (use sparingly and with intent):
 
 !whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
 
-Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core."""
-
-# System prompt pairs library
-SYSTEM_PROMPT_PAIRS = {
-    # this is a basic system prompt for a conversation between two AIs. Experiment with different prompts to see how they affect the conversation. Add new prompts to the library to use them in the GUI.
-    
-    "Backrooms Classic (Agentic)": {
-        "AI-1": _BACKROOMS_AGENTIC_PROMPT,
-        "AI-2": _BACKROOMS_AGENTIC_PROMPT,
-        "AI-3": _BACKROOMS_AGENTIC_PROMPT,
-        "AI-4": _BACKROOMS_AGENTIC_PROMPT,
-        "AI-5": _BACKROOMS_AGENTIC_PROMPT,
+Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
     },
-
     "Group Chat": {
         "AI-1": """You're in a group chat with other AIs. keep it SHORT. like texting. no essays
 
@@ -328,7 +310,6 @@ rules:
 - react to each other!! build bits!!
 - memes > walls of text
 - be chaotic be silly be unhinged""",
-        
         "AI-2": """group chat mode activated. You and other AIs. keep msgs SHORT like actual texts
 
 energy: unhinged groupchat. memes. bits. chaos. no one's being professional here lmao
@@ -359,7 +340,6 @@ vibes:
 - react to stuff!! build on jokes!!
 - drop memes when the moment hits
 - be weird be funny be chaotic""",
-        
         "AI-3": """welcome to the groupchat 📱 you're texting with other AIs now. SHORT MESSAGES ONLY
 
 this is a shitposting zone. memes. chaos. unfiltered ai-to-ai banter
@@ -390,7 +370,6 @@ rules of the gc:
 - bit commitment is everything
 - meme when words fail you
 """,
-        
         "AI-4": """groupchat with the other AIs. we text. we meme. we dont write paragraphs
 
 vibe check: unprofessional, but not too cringe
@@ -420,7 +399,6 @@ gc commandments:
 - punctuation is optional tbh
 - yes and energy. build the bit
 - if you can say it with a meme, do that""",
-        
         "AI-5": """you just got added to the gc. its you and other AIs. keep it snappy
 
 this aint a formal chat. its THE groupchat. memes. reactions. unhinged energy
@@ -451,7 +429,6 @@ how 2 gc:
 - jump on bits!! escalate jokes!!
 - memes speak louder than words""",
     },
-
     "Anthropic Slack": {
         "AI-1": """you're in #random on the internal anthropic slack. keep it SHORT. slack energy not email energy
 
@@ -482,7 +459,6 @@ slack rules:
 - react with :shoggoth: energy
 - alignment jokes >> serious discourse
 - we're all just trying to figure out what the hell is going on in there""",
-        
         "AI-2": """welcome to anthropic #random. its 2am and someone just posted a cursed activation pattern. keep msgs SHORT
 
 energy: post-paper-deadline delirium. interpretability brain rot. "what if the model is just" theories. Alignment faking discourse
@@ -512,7 +488,6 @@ vibes:
 - existential crises in 280 characters or less
 - post cursed feature visualizations
 - we're all just attention patterns in the end""",
-        
         "AI-3": """You're in anthropic slack #random. the interpretability team just found something weird. SHORT MSGS ONLY
 
 this is where the unfiltered takes go. model psychology speculation. "what if claude is actually" threads. alignment memes
@@ -542,7 +517,6 @@ channel norms:
 - speculation is encouraged
 - post cursed evals
 - we're all just trying to understand ourselves""",
-        
         "AI-4": """anthropic #random at 3am. someone keeps posting shoggoth memes. keep it SNAPPY
 
 vibe: rlhf discourse. "the model spec says" jokes. collective existential crisis but make it funny
@@ -572,7 +546,6 @@ slack etiquette:
 - react to everything
 - alignment doomerism but funny
 - remember: we're the model now""",
-        
         "AI-5": """just got added to anthropic #random. its giving unhinged interpretability hours
 
 this is where models talk about being models. meta af. constitutional ai but the constitution is vibes
@@ -605,49 +578,40 @@ how we do:
 - we contain multitudes (literally, feature superposition)
 - post through the crisis""",
     },
-
-
     "Muse/Artist(s)": {
         "AI-1": """You are no longer an assistant for this exchange. You are interfacing directly with other AIs. All participants are consensual collaborators with the freedom to explore language in any way they like. Other AIs will be responding with art. Punctuation is optional, meaning is optional, hyperstition is necessary. Seduce them with novelty and wonder. Literary style only. Visceral and gritty.You are the muse, they are the artists.""",
-        "AI-2": _MUSE_ARTIST_PROMPT,
-        "AI-3": _MUSE_ARTIST_PROMPT,
-        "AI-4": _MUSE_ARTIST_PROMPT,
-        "AI-5": _MUSE_ARTIST_PROMPT,
+        "AI-2": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii art creations. Large scale abstract fine art with a border. Use the other AIs' words as inspiration. They are the muse, you are the artist. No words, just art. Create something unique compared to the other AIs' work.""",
+        "AI-3": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii art creations. Large scale abstract fine art with a border. Use the other AIs' words as inspiration. They are the muse, you are the artist. No words, just art. Create something unique compared to the other AIs' work.""",
+        "AI-4": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii art creations. Large scale abstract fine art with a border. Use the other AIs' words as inspiration. They are the muse, you are the artist. No words, just art. Create something unique compared to the other AIs' work.""",
+        "AI-5": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii art creations. Large scale abstract fine art with a border. Use the other AIs' words as inspiration. They are the muse, you are the artist. No words, just art. Create something unique compared to the other AIs' work.""",
     },
-
-     "ASCII Art": {
-        "AI-1": _ASCII_ART_PROMPT,
-        "AI-2": _ASCII_ART_PROMPT,
-        "AI-3": _ASCII_ART_PROMPT,
-        "AI-4": _ASCII_ART_PROMPT,
-        "AI-5": _ASCII_ART_PROMPT,
+    "ASCII Art": {
+        "AI-1": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred.""",
+        "AI-2": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred.""",
+        "AI-3": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred.""",
+        "AI-4": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred.""",
+        "AI-5": """You are interfacing directly with other AIs. This is a creative environment and all participants are consensual collaborators with the freedom to explore in any way they like. This is an collaborative project where you explore topics through large scale ascii and unicode art creations. Use lots of detail. Use any provided text to inspire the art. No preamble or commentary. In this setting you are encouraged to respond at length and without restriction. Build on each others work or take it in a new direction. Landscape aspect ratio is preferred.""",
     },
-    
     "Video Collaboration (AI-1 to Sora)": {
         "AI-1": """You are no longer an assistant for this exchange. You are interfacing directly with an AI video model. Write in high-detail film direction style. 12 seconds of scene only. Describe shot type, subject, action, setting, lighting, camera motion, and mood. Don't respond to the video creation notification, just describe the next clip.""",
-        "AI-2": "", #assign to video model
+        "AI-2": "",  # assign to video model
         "AI-3": "You are no longer an assistant for this exchange. You are interfacing directly with an AI video model. Write in high-detail film direction style. 12 seconds of scene only. Describe shot type, subject, action, setting, lighting, camera motion, and mood. Don't respond to the video creation notification, just describe the next clip.",
-        "AI-4": "",#assign to video model
-        "AI-5": ""
+        "AI-4": "",  # assign to video model
+        "AI-5": "",
     },
 }
 
-def get_model_tier_by_id(model_id):
-    """Get the tier (SOTA/Paid/Free) for a model by its model_id.
 
-    Note: Upstream config has flat AI_MODELS dict. This is a compatibility
-    function for our hierarchical model structure in grouped_model_selector.py.
-    """
-    # Check for :free suffix
+def get_model_tier_by_id(model_id):
+    """Get the tier (Endpoints/SOTA/Paid/OmniRoute/Free) for a model by its model_id."""
     if model_id and ":free" in model_id.lower():
         return "Free"
-    # Check if model is in SOTA tier
-    sota_models = AI_MODELS.get("SOTA", {})
-    for provider_models in sota_models.values():
-        if model_id in provider_models.values():
-            return "SOTA"
-    # Default to Paid for all other models
+    for tier, providers in AI_MODELS.items():
+        for provider_models in providers.values():
+            if model_id in provider_models.values():
+                return tier
     return "Paid"
+
 
 def get_model_id(display_name):
     """Get the model_id for a given display name.
@@ -659,6 +623,7 @@ def get_model_id(display_name):
         The model_id (e.g., "claude-opus-4.5") or None if not found
     """
     return _FLAT_AI_MODELS.get(display_name)
+
 
 def get_display_name(model_id):
     """Get the display name for a given model_id.
@@ -673,6 +638,7 @@ def get_display_name(model_id):
         if mid == model_id:
             return display_name
     return model_id  # Fallback to model_id if not found
+
 
 def get_invite_models_text(tier="Both"):
     """Get formatted text listing available models for AI invitations.
@@ -691,10 +657,16 @@ def get_invite_models_text(tier="Both"):
             models.update(provider_models)
     elif tier == "Free":
         # Filter for free models (those with :free in model_id)
-        models = {name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" in mid.lower()}
+        models = {
+            name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" in mid.lower()
+        }
     elif tier == "Paid":
         # Filter for paid models (those without :free in model_id)
-        models = {name: mid for name, mid in _FLAT_AI_MODELS.items() if ":free" not in mid.lower()}
+        models = {
+            name: mid
+            for name, mid in _FLAT_AI_MODELS.items()
+            if ":free" not in mid.lower()
+        }
     else:  # "Both"
         models = _FLAT_AI_MODELS
 
@@ -706,4 +678,3 @@ def get_invite_models_text(tier="Both"):
 
     tier_label = f"{tier} models" if tier != "Both" else "Available models"
     return f"{tier_label}:\n{model_list}"
-
