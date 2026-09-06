@@ -5,7 +5,6 @@
   "buildCommand": null,
   "installCommand": null,
   "outputDirectory": "docs",
-  "cleanUrls": true,
   "trailingSlash": false,
   "headers": [
     {
