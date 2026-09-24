@@ -1,0 +1,71 @@
+{
+  "errors": [
+    "Planner quorum not met: 0/3 valid; minimum 2."
+  ],
+  "failure_reason": "Planner quorum not met: 0/3 valid; minimum 2.",
+  "final_plan": "",
+  "judge": {
+    "errors": [
+      "Planner quorum not met: 0/3 valid; minimum 2."
+    ],
+    "status": "failed",
+    "summary": "Planner quorum not met: 0/3 valid; minimum 2."
+  },
+  "keep_open": false,
+  "phase": "failed",
+  "planners": [
+    {
+      "attempt_count": 3,
+      "duration_ms": 4489,
+      "errors": [
+        "missing headers: # Plan, ## Overview, ## Scope, ## Phases, ## Testing Strategy, ## Risks, ## Rollback Plan, ## Edge Cases"
+      ],
+      "id": "sol",
+      "requested_model": "codex/gpt-5.6-sol-high",
+      "status": "needs-fix",
+      "summary": "Unable to retrieve CCR content: no CCR retrieval tool is available. Paste the referenced content or provide an accessible path.",
+      "valid": false,
+      "validation_state": "invalid"
+    },
+    {
+      "attempt_count": 3,
+      "duration_ms": 4488,
+      "errors": [
+        "missing headers: # Plan, ## Overview, ## Scope, ## Phases, ## Testing Strategy, ## Risks, ## Rollback Plan, ## Edge Cases"
+      ],
+      "id": "claude",
+      "requested_model": "anthropic/claude-sonnet-5",
+      "status": "needs-fix",
+      "summary": "\u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/.omniroute/.env\u001b[0m\n  \u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/Documents/PROJECTS/liminal_backrooms/.env\u001b[0m\n  \u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/.local/share/mise/installs/node/26.3.0/lib/node_modules/omniroute/.env\u001b[0m\n\n\u001b[31m\u2716 404 Not Found\u001b[0m\n{\"error\":{\"message\":\"No active credentials for provider: anthropic\",\"type\":\"invalid_request_error\",\"code\":\"model_not_found\"}}",
+      "valid": false,
+      "validation_state": "invalid"
+    },
+    {
+      "attempt_count": 3,
+      "duration_ms": 10185,
+      "errors": [
+        "missing headers: # Plan, ## Overview, ## Scope, ## Phases, ## Testing Strategy, ## Risks, ## Rollback Plan, ## Edge Cases"
+      ],
+      "id": "glm",
+      "requested_model": "nvidia/z-ai/glm-5.2",
+      "status": "needs-fix",
+      "summary": "\u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/.omniroute/.env\u001b[0m\n  \u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/Documents/PROJECTS/liminal_backrooms/.env\u001b[0m\n  \u001b[2m\ud83d\udccb Loaded env from /Users/patrickgallowaypro/.local/share/mise/installs/node/26.3.0/lib/node_modules/omniroute/.env\u001b[0m\n\n\u001b[31m\u2716 410 Gone\u001b[0m\n{\"error\":{\"message\":\"[nvidia/z-ai/glm-5.2] [410]: {\\\"type\\\":\\\"about:blank\\\",\\\"title\\\":\\\"Gone\\\",\\\"status\\\":410,\\\"detail\\\":\\\"The model 'z-ai/glm-5.2' has reached its end of life on 2026-08-21T09:00:00Z and is no longer available.\\\"} (reset after 3s)\"}}",
+      "valid": false,
+      "validation_state": "invalid"
+    }
+  ],
+  "quorum": {
+    "minimum": 2,
+    "total": 3,
+    "valid": 0
+  },
+  "run_id": "20260825-review-the-upgraded-llm-council-implemen",
+  "status": "failed",
+  "task_brief": "Task: Review the upgraded LLM Council implementation and produce a production-hardening implementation plan. Focus on correctness, OmniRoute routing guarantees, failure recovery, auditability, UI accuracy, security, tests, and the smallest high-value follow-up changes.\nConstraints:\n- Inspect the current implementation under /Users/patrickgallowaypro/.agents/skills/llm-council\n- Preserve backward compatibility with existing agents.json files and non-OmniRoute agent kinds\n- Keep LLM Council a thin orchestrator and keep provider routing and credentials in OmniRoute\n- Do not execute commands suggested by planner output\n- Prefer small, testable changes over new framework layers\nRepo root: /Users/patrickgallowaypro/.agents/skills/llm-council\nRelevant paths:\n- scripts/llm_council.py\n- scripts/ui/\n- tests/test_llm_council.py\n- references/\nNotes: Current implementation has live OmniRoute preflight, explicit models, quorum, retries, manifests, attempt JSONL, inspect command, runtime preferences, and enhanced local UI. Determine remaining correctness gaps and sequence fixes by risk.",
+  "timestamps": {
+    "started_at": "2026-08-25T15:41:05.695862+00:00",
+    "updated_at": "2026-08-25T15:41:37.385521+00:00"
+  },
+  "ui_deadline": "2026-08-25T16:11:05.695953+00:00",
+  "warnings": []
+}

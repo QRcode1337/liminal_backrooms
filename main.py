@@ -43,7 +43,7 @@ from shared_utils import (
     generate_video_with_sora
 )
 from gui import LiminalBackroomsApp, load_fonts
-from command_parser import parse_commands, AgentCommand, format_command_result
+from command_parser import parse_commands, AgentCommand, format_command_result, resolve_participant_target
 
 # Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
 if DEVELOPER_TOOLS:
@@ -853,6 +853,7 @@ class ConversationManager:
             # Get AI's model name for consistent formatting
             ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_num)
+            caller = self._format_caller(ai_name)
             
             # Create a failure notification message that AIs can see
             truncated_prompt = prompt[:50] + '...' if len(prompt) > 50 else prompt
@@ -868,20 +869,20 @@ class ConversationManager:
             error_lower = error.lower()
             if "402" in error or "credits" in error_lower or "insufficient" in error_lower:
                 simple_error = "insufficient API credits"
-                detail = "Check your OpenRouter balance"
+                detail = "Check XAI_API_KEY / OPENAI_API_KEY / OpenRouter balance"
             elif "429" in error or "rate" in error_lower or "limit" in error_lower:
                 simple_error = "rate limited"
                 detail = "Too many requests, please wait"
                 print(f"[Agent]   >>> RATE LIMITED - Full response: {error}")
             elif "401" in error or "unauthorized" in error_lower or "api key" in error_lower:
                 simple_error = "authentication failed"
-                detail = "Check your OPENROUTER_API_KEY"
+                detail = "Check XAI_API_KEY or OPENAI_API_KEY"
             elif "timeout" in error_lower:
                 simple_error = "request timed out"
                 detail = "Server took too long to respond"
             elif "500" in error or "502" in error or "503" in error or "server" in error_lower:
                 simple_error = "server error"
-                detail = "OpenRouter or model provider is having issues"
+                detail = "Grok Imagine, OpenAI, or OpenRouter is having issues"
             elif "modalities" in error_lower or "not support" in error_lower:
                 simple_error = "model doesn't support image generation"
                 detail = "Try a different image model"
@@ -2108,7 +2109,10 @@ class ConversationManager:
         enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image using the following ai text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
         
         # Generate the image
-        result = generate_image_from_text(enhanced_prompt)
+        speaker_model = None
+        if self._is_ai_name(ai_name):
+            speaker_model = self.get_model_for_ai(int(ai_name.split('-')[1]))
+        result = generate_image_from_text(enhanced_prompt, caller_model=speaker_model)
         
         if result["success"]:
             # Display the image in the UI
@@ -2227,7 +2231,7 @@ class ConversationManager:
                 enhanced_prompt = f"Create an image inspired by the following description from an AI conversation: {prompt}"
                 
                 print(f"[Agent] Starting image generation...")
-                result = generate_image_from_text(enhanced_prompt)
+                result = generate_image_from_text(enhanced_prompt, caller_model=model_name)
                 
                 if result.get('success'):
                     image_path = result['image_path']
@@ -2672,39 +2676,43 @@ class ConversationManager:
 
         return True, poll_text
 
+    def _whisper_roster(self) -> list:
+        """Active AI slots as (name, model_id, display_name)."""
+        num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
+        roster = []
+        for i in range(1, num_ais + 1):
+            model_id = self.get_model_for_ai(i) or ""
+            roster.append((f"AI-{i}", model_id, get_display_name(model_id) or model_id))
+        return roster
+
     def _execute_whisper_command(self, target: str, message: str, ai_name: str) -> tuple[bool, str]:
-        """Execute a whisper command - private message to a specific AI."""
+        """Private to the target AI; the human operator still sees the text."""
         caller = self._format_caller(ai_name)
 
         if not target or not message:
             return False, f"❌ [{caller}]: !whisper — missing target or message"
 
-        # Normalize target (accept "AI-1", "ai-1", "1", etc.)
-        target_normalized = target.upper().strip()
-        if not target_normalized.startswith('AI-'):
-            target_normalized = f"AI-{target_normalized}"
+        roster = self._whisper_roster()
+        target_name, error = resolve_participant_target(target, roster)
+        if error:
+            return False, f"❌ [{caller}]: !whisper — {error}"
 
-        # Check if target AI exists (based on current number of AIs)
-        try:
-            target_num = int(target_normalized.split('-')[1])
-            num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
-            if target_num < 1 or target_num > num_ais:
-                return False, f"❌ [{caller}]: !whisper — {target_normalized} doesn't exist (only {num_ais} AIs active)"
-        except (ValueError, IndexError):
-            return False, f"❌ [{caller}]: !whisper — invalid target '{target}'"
+        target_entry = next(p for p in roster if p[0] == target_name)
+        target_model = target_entry[1]
+        target_label = f"{target_name} ({target_model})" if target_model else target_name
 
-        # Add the whisper as a hidden message that only appears in the target's context
-        # We create a special message that gets filtered per-AI during turn processing
         whisper_msg = {
             "role": "system",
             "content": f"[Private whisper from {caller}]: {message}",
             "_type": "whisper",
             "_whisper_from": ai_name,
-            "_whisper_to": target_normalized,
-            "hidden": True  # Hidden from main display
+            "_whisper_to": target_name,
+            "_whisper_to_model": target_model,
+            "_whisper_text": message,
+            "ai_name": ai_name,
+            "hidden": False,
         }
 
-        # Add to conversation
         if self.app.active_branch:
             branch_id = self.app.active_branch
             if branch_id in self.app.branch_conversations:
@@ -2714,8 +2722,8 @@ class ConversationManager:
                 self.app.main_conversation = []
             self.app.main_conversation.append(whisper_msg)
 
-        # Show notification (visible) but actual whisper content is private
-        return True, f"🤫 [{caller}]: whispered to {target_normalized}"
+        # Notification has no body so other AIs don't learn the secret from the system line.
+        return True, f"🤫 [{caller}] → {target_label}"
 
     def get_model_for_ai(self, ai_number):
         """Get the selected model ID for the AI by number (1-5)"""
@@ -3220,6 +3228,12 @@ class ConversationManager:
             background: rgba(16, 185, 129, 0.06);
             font-size: 0.9em;
         }
+
+        .message.whisper {
+            border-left: 3px dashed var(--accent-yellow);
+            background: rgba(251, 191, 36, 0.06);
+            font-style: italic;
+        }
         
         .message-content {
             width: 100%;
@@ -3468,6 +3482,8 @@ class ConversationManager:
                 message_class = role
                 if msg_type == "agent_notification":
                     message_class = "agent-notification"
+                elif msg_type == "whisper":
+                    message_class = "whisper"
                 elif msg_type == "generated_image":
                     message_class = "generated-image"
                 
@@ -3528,6 +3544,19 @@ class ConversationManager:
                         html_content += f' <span class="timestamp">{timestamp}</span></div>'
                     else:
                         html_content += f'\n                <div class="header"><span class="ai-name human">Human User</span> <span class="timestamp">{timestamp}</span></div>'
+                elif msg_type == "whisper":
+                    from_name = msg.get("_whisper_from", ai_name or "AI")
+                    to_name = msg.get("_whisper_to", "")
+                    to_model = msg.get("_whisper_to_model", "")
+                    dest = f"{to_name} ({to_model})" if to_model else to_name
+                    html_content += (
+                        f'\n                <div class="header">'
+                        f'<span class="ai-name system">🤫 WHISPER {from_name} → {dest}</span>'
+                        f' <span class="timestamp">{timestamp}</span></div>'
+                    )
+                    if msg.get("_whisper_text"):
+                        processed_content = self.app.left_pane.process_content_with_code_blocks(msg.get("_whisper_text"))
+                        processed_content = self.apply_greentext_styling(processed_content)
                 elif role == "system" and msg_type != "agent_notification":
                     html_content += f'\n                <div class="header"><span class="ai-name system">System</span> <span class="timestamp">{timestamp}</span></div>'
                 

@@ -489,9 +489,9 @@ class PropertyInspector(QWidget):
                     item.setForeground(1, QColor('black'))
                 else:
                     item.setForeground(1, QColor('white'))
-            except Exception as e:
-                print(f"[Debug] Could not inspect palette role {role_name}: {e}")
-
+            except:
+                pass
+        
         # Widget-specific properties
         if isinstance(widget, QComboBox):
             combo = create_section("QComboBox")
