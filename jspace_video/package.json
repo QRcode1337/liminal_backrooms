@@ -1,0 +1,22 @@
+{
+  "name": "jspace-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Explainer video: J-space, the verbalizable global workspace inside language models",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render JSpace out/jspace.mp4",
+    "still": "remotion still JSpace out/still.png",
+    "render:vertical": "remotion render JSpaceVertical out/jspace_vertical.mp4",
+    "render:short": "remotion render JSpaceShort out/jspace_short.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.531",
+    "@remotion/transitions": "^4.0.531",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.531",
+    "typescript": "^7.0.2"
+  }
+}
