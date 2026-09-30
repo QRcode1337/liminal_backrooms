@@ -38,13 +38,18 @@ npm install
 pip install kokoro-onnx soundfile numpy
 python3 scripts/tts.py path/to/kokoro-v1.0.int8.onnx path/to/voices-v1.0.bin
 
-# 2. Ambient drone bed (generated, not committed)
-python3 scripts/drone.py
+# 2. Generated audio beds (not committed)
+python3 scripts/drone.py   # ambient drone for the long cuts
+python3 scripts/sfx.py     # 100 BPM beat + impact/whoosh/glitch/riser/tick SFX for the short
+
+# Short cut voiceover (script: scripts/short_narration.json)
+python3 scripts/tts.py path/to/kokoro-v1.0.int8.onnx path/to/voices-v1.0.bin short 1.0
 
 # 3. Preview / render
 npm run studio
 npm run render            # -> out/jspace.mp4          (1920x1080)
-npm run render:vertical   # -> out/jspace_vertical.mp4 (1080x1920, TikTok/Reels/Shorts)
+npm run render:vertical   # -> out/jspace_vertical.mp4 (1080x1920, full 4 min)
+npm run render:short      # -> out/jspace_short.mp4    (1080x1920, ~74 s native vertical)
 ```
 
 In a headless container without Remotion's own browser download, point it at an existing
@@ -63,4 +68,8 @@ REMOTION_BROWSER=/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/head
 - `src/Video.tsx`: both compositions. `JSpaceVertical` scales the 16:9 scenes into a middle
   band, with a chapter header above and 6-word caption chunks below, kept clear of TikTok's UI
   (top ~150px, bottom ~400px, right ~140px).
+- `src/short/`: the ~74 s native-vertical cut (`JSpaceShort`): hook → lens → spider → tiny
+  workspace → safety → J-SPACE slam. `fx.tsx` has the effects (perspective corridor, chromatic
+  glitch text, slams, camera shake, flashes, glitch cuts, word bursts, kinetic word captions);
+  `Scenes.tsx` places each effect and SFX on the narration cue words.
 - `src/scenes/*`: one component per scene. `src/ui.tsx` holds the palette, CRT overlay and captions.
