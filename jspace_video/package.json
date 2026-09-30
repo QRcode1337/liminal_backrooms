@@ -6,7 +6,8 @@
   "scripts": {
     "studio": "remotion studio",
     "render": "remotion render JSpace out/jspace.mp4",
-    "still": "remotion still JSpace out/still.png"
+    "still": "remotion still JSpace out/still.png",
+    "render:vertical": "remotion render JSpaceVertical out/jspace_vertical.mp4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.531",

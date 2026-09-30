@@ -101,9 +101,9 @@ export const Audit: React.FC = () => {
     ['fictional', tFake + 10, C.green],
   ];
   const words2: [string, number, string][] = [
-    ['secretly', tHack + 40, C.red],
-    ['fraud', tHack + 55, C.red],
-    ['fake', tHack + 70, C.red],
+    ['secretly', cue('secretly'), C.red],
+    ['fraud', cue('fraud'), C.red],
+    ['fake', cue('fraud') + 15, C.red],
   ];
   const words = phase2 ? words2 : words1;
   const removed = frame > tRemove && !phase2;
@@ -137,7 +137,7 @@ export const Audit: React.FC = () => {
         <div style={{marginTop: 50, fontSize: 30, color: C.red, opacity: removed ? fadeIn(frame, tRemove + 15) : 0, textShadow: glow(C.red, 10)}}>
           ablate eval-awareness → blackmail can surface
         </div>
-        <div style={{marginTop: 50, fontSize: 30, color: C.red, opacity: phase2 ? fadeIn(frame, tHack + 80) : 0}}>
+        <div style={{marginTop: 50, fontSize: 30, color: C.red, opacity: phase2 ? fadeIn(frame, cue('while its')) : 0}}>
           hidden intent visible on benign prompts
         </div>
       </div>

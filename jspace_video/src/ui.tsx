@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {createContext, useContext} from 'react';
 import {
   AbsoluteFill,
   interpolate,
@@ -100,9 +100,15 @@ export const CRT: React.FC = () => {
   );
 };
 
+// True inside the vertical (TikTok) composition, where chrome like section tags
+// is drawn outside the scaled scene instead.
+export const VerticalCtx = createContext(false);
+
 export const SectionTag: React.FC<{n: string; label: string}> = ({n, label}) => {
   const frame = useCurrentFrame();
+  const vertical = useContext(VerticalCtx);
   const chars = Math.floor(interpolate(frame, [0, 20], [0, label.length], {extrapolateRight: 'clamp'}));
+  if (vertical) return null;
   return (
     <div
       style={{
@@ -120,15 +126,30 @@ export const SectionTag: React.FC<{n: string; label: string}> = ({n, label}) => 
   );
 };
 
-// Subtitles: split narration into sentences, time them by character share.
-export const Captions: React.FC<{text: string; seconds: number; lead: number}> = ({
-  text,
-  seconds,
-  lead,
-}) => {
+// Split narration into caption units: whole sentences, or short word chunks
+// (maxWords) that never cross a sentence boundary.
+const captionParts = (text: string, maxWords?: number) => {
+  const sentences = text.match(/[^.?!:]+[.?!:]+/g) ?? [text];
+  if (!maxWords) return sentences;
+  return sentences.flatMap((s) => {
+    const words = s.trim().split(/\s+/);
+    const n = Math.ceil(words.length / maxWords);
+    const size = Math.ceil(words.length / n);
+    return Array.from({length: n}, (_, i) => words.slice(i * size, (i + 1) * size).join(' ') + ' ');
+  });
+};
+
+// Subtitles, timed by each unit's character share of the narration.
+export const Captions: React.FC<{
+  text: string;
+  seconds: number;
+  lead: number;
+  maxWords?: number;
+  style?: React.CSSProperties;
+}> = ({text, seconds, lead, maxWords, style}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const parts = text.match(/[^.?!:]+[.?!:]+/g) ?? [text];
+  const parts = captionParts(text, maxWords);
   const total = parts.reduce((a, p) => a + p.length, 0);
   const t = (frame - lead) / fps;
   let acc = 0;
@@ -137,7 +158,7 @@ export const Captions: React.FC<{text: string; seconds: number; lead: number}> =
     const start = (acc / total) * seconds;
     acc += p.length;
     const end = (acc / total) * seconds;
-    if (t >= start && t < end + 0.3) current = p.trim();
+    if (t >= start && t < end + (maxWords ? 0 : 0.3)) current = p.trim();
   }
   if (t < 0 || t > seconds + 0.3) current = '';
   return (
@@ -152,6 +173,7 @@ export const Captions: React.FC<{text: string; seconds: number; lead: number}> =
         lineHeight: 1.35,
         color: C.white,
         textShadow: '0 0 8px #000, 0 0 4px #000',
+        ...style,
       }}
     >
       {current && (
