@@ -22,10 +22,10 @@ except ImportError:
     print("BeautifulSoup not found. Please install it with 'pip install beautifulsoup4'")
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS  # maintained successor to duckduckgo_search
 except ImportError:
     DDGS = None
-    print("DuckDuckGo Search not found. Install with: pip install duckduckgo-search")
+    print("ddgs not found. Install with: pip install ddgs")
 
 # Load environment variables
 load_dotenv()
@@ -1029,139 +1029,216 @@ def read_living_document(*args, **kwargs):
 def process_living_document_edits(result, model_name):
     return result
 
-def generate_image_from_text(text, model="google/gemini-3-pro-image-preview"):
-    """Generate an image based on text using OpenRouter's image generation API"""
+XAI_IMAGE_MODELS = (
+    "grok-imagine-image-2.0",
+    "grok-imagine-image-quality",
+    "grok-imagine-image",
+)
+OPENAI_IMAGE_MODELS = (
+    "gpt-image-2",
+    "gpt-image-1.5",
+)
+OPENROUTER_IMAGE_MODEL = "google/gemini-3-pro-image-preview"
+
+
+def _write_image_bytes(data: bytes, timestamp: str, ext: str = ".png") -> str:
+    image_dir = Path("images")
+    image_dir.mkdir(exist_ok=True)
+    if data[:3] == b"\xff\xd8\xff":
+        ext = ".jpg"
+    elif data[:4] == b"\x89PNG":
+        ext = ".png"
+    elif data[:4] == b"GIF8":
+        ext = ".gif"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        ext = ".webp"
+    image_path = image_dir / f"generated_{timestamp}{ext}"
+    with open(image_path, "wb") as f:
+        f.write(data)
+    print(f"Generated image saved to {image_path}")
+    return str(image_path)
+
+
+def _decode_b64_image(payload: str) -> bytes:
+    if payload.startswith("data:image"):
+        payload = payload.split(",", 1)[1]
+    return base64.b64decode(payload)
+
+
+def _images_api_first_payload(result: dict):
+    data = result.get("data") if isinstance(result, dict) else None
+    if not data:
+        return None, "No images in API response"
+    item = data[0] if isinstance(data[0], dict) else {}
+    if item.get("b64_json"):
+        return ("b64", item["b64_json"]), None
+    url = item.get("url")
+    image_url = item.get("image_url")
+    if not url and isinstance(image_url, dict):
+        url = image_url.get("url")
+    elif not url and isinstance(image_url, str):
+        url = image_url
+    if url:
+        return ("url", url), None
+    return None, "No image payload in API response"
+
+
+def choose_image_backends(caller_model=None, explicit_model=None):
+    """Ordered (backend, model_id) pairs for !image.
+
+    Grok Imagine (xAI) and GPT Image (OpenAI / Codex path) are the primary
+    generators. OpenRouter Gemini is last-resort fallback.
+    """
+    caller = (caller_model or "").lower()
+    explicit = (explicit_model or "").strip()
+
+    xai_models = list(XAI_IMAGE_MODELS)
+    openai_models = list(OPENAI_IMAGE_MODELS)
+
+    if explicit:
+        low = explicit.lower()
+        leaf = explicit.split("/", 1)[-1]
+        if "imagine-image" in low or low.startswith("grok-imagine"):
+            xai_models = [leaf] + [m for m in xai_models if m != leaf]
+        elif low.startswith("gpt-image") or "dall-e" in low:
+            openai_models = [leaf] + [m for m in openai_models if m != leaf]
+
+    xai_chain = [("xai", m) for m in xai_models]
+    openai_chain = [("openai", m) for m in openai_models]
+    openrouter_chain = [("openrouter", OPENROUTER_IMAGE_MODEL)]
+
+    if caller.startswith(("cx/", "codex/", "openai/")):
+        return openai_chain + xai_chain + openrouter_chain
+    return xai_chain + openai_chain + openrouter_chain
+
+
+def _post_images_generations(base_url: str, api_key: str, model: str, prompt: str, extra=None):
+    payload = {"model": model, "prompt": prompt, "n": 1}
+    if extra:
+        payload.update(extra)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    url = f"{base_url.rstrip('/')}/images/generations"
+    b64_payload = dict(payload)
+    b64_payload["response_format"] = "b64_json"
+    response = requests.post(url, headers=headers, json=b64_payload, timeout=120)
+    if response.status_code in (400, 422):
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+    return response
+
+
+def _materialize_images_response(response, timestamp: str):
+    if response.status_code != 200:
+        return None, f"API error {response.status_code}: {response.text[:500]}"
     try:
-        # Create a directory for the images if it doesn't exist
-        image_dir = Path("images")
-        image_dir.mkdir(exist_ok=True)
-        
-        # Create a timestamp for the image filename (include microseconds to avoid collisions)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        
-        # Call OpenRouter API for image generation
-        headers = {
-            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ],
-            "modalities": ["image", "text"],
-            "max_tokens": 1024  # Limit tokens for image generation to avoid credit issues
-        }
-        
-        print(f"Generating image with {model}...")
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            
-            # The generated image will be in the assistant message
-            if result.get("choices"):
-                message = result["choices"][0].get("message", {})
-                
-                # Check for images in the message
-                if message.get("images"):
-                    for image in message["images"]:
-                        image_url = image["image_url"]["url"]  # Base64 data URL
-                        print(f"Generated image URL (first 50 chars): {image_url[:50]}...")
-                        
-                        # Handle base64 data URL
-                        if image_url.startswith('data:image'):
-                            try:
-                                # Detect actual image format from data URL header
-                                # Format: data:image/jpeg;base64,... or data:image/png;base64,...
-                                ext = ".jpg"  # Default to jpg
-                                if image_url.startswith('data:image/png'):
-                                    ext = ".png"
-                                elif image_url.startswith('data:image/gif'):
-                                    ext = ".gif"
-                                elif image_url.startswith('data:image/webp'):
-                                    ext = ".webp"
-                                
-                                # Extract base64 data after comma
-                                base64_data = image_url.split(',', 1)[1] if ',' in image_url else image_url
-                                
-                                # Decode base64 to image
-                                image_data = base64.b64decode(base64_data)
-                                image_path = image_dir / f"generated_{timestamp}{ext}"
-                                with open(image_path, "wb") as f:
-                                    f.write(image_data)
-                                
-                                print(f"Generated image saved to {image_path}")
-                                return {
-                                    "success": True,
-                                    "image_path": str(image_path),
-                                    "timestamp": timestamp,
-                                    "model": model
-                                }
-                            except Exception as e:
-                                print(f"Failed to decode base64 image: {e}")
-                                return {
-                                    "success": False,
-                                    "error": f"Failed to decode image: {e}"
-                                }
-                        else:
-                            # If it's a regular URL, download it
-                            try:
-                                img_response = requests.get(image_url, timeout=30)
-                                if img_response.status_code == 200:
-                                    image_path = image_dir / f"generated_{timestamp}.png"
-                                    with open(image_path, "wb") as f:
-                                        f.write(img_response.content)
-                                    
-                                    print(f"Generated image saved to {image_path}")
-                                    return {
-                                        "success": True,
-                                        "image_path": str(image_path),
-                                        "timestamp": timestamp,
-                                        "model": model
-                                    }
-                            except Exception as e:
-                                print(f"Failed to download image: {e}")
-                                return {
-                                    "success": False,
-                                    "error": f"Failed to download image: {e}"
-                                }
-                
-                # No images in response
-                print(f"No images in response. Message keys: {list(message.keys()) if isinstance(message, dict) else 'non-dict'}")
-                return {
-                    "success": False,
-                    "error": "No images in API response"
-                }
+        result = response.json()
+    except Exception as exc:
+        return None, f"Invalid JSON from image API: {exc}"
+    payload, err = _images_api_first_payload(result)
+    if err:
+        return None, err
+    kind, value = payload
+    try:
+        if kind == "b64":
+            data = _decode_b64_image(value)
+            return _write_image_bytes(data, timestamp), None
+        img_response = requests.get(value, timeout=60)
+        if img_response.status_code != 200:
+            return None, f"Failed to download image: HTTP {img_response.status_code}"
+        return _write_image_bytes(img_response.content, timestamp), None
+    except Exception as exc:
+        return None, f"Failed to save image: {exc}"
+
+
+def _generate_image_openrouter(text, model, timestamp: str):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return None, "OPENROUTER_API_KEY not set"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": text}],
+        "modalities": ["image", "text"],
+        "max_tokens": 1024,
+    }
+    print(f"Generating image with OpenRouter {model}...")
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=60,
+    )
+    if response.status_code != 200:
+        return None, f"API error {response.status_code}: {response.text[:500]}"
+    result = response.json()
+    if not result.get("choices"):
+        return None, "No choices in API response"
+    message = result["choices"][0].get("message", {})
+    for image in message.get("images") or []:
+        image_url = (image.get("image_url") or {}).get("url", "")
+        if not image_url:
+            continue
+        if image_url.startswith("data:image"):
+            data = _decode_b64_image(image_url)
+            return _write_image_bytes(data, timestamp), None
+        img_response = requests.get(image_url, timeout=30)
+        if img_response.status_code == 200:
+            return _write_image_bytes(img_response.content, timestamp), None
+    return None, "No images in API response"
+
+
+def generate_image_from_text(text, model=None, caller_model=None):
+    """Generate an image with Grok Imagine, then OpenAI GPT Image, then OpenRouter."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    errors = []
+    for backend, backend_model in choose_image_backends(caller_model, model):
+        print(f"[Image] Trying {backend}/{backend_model}...")
+        try:
+            if backend == "xai":
+                api_key = os.getenv("XAI_API_KEY")
+                if not api_key:
+                    errors.append("xai: XAI_API_KEY not set")
+                    continue
+                response = _post_images_generations(
+                    "https://api.x.ai/v1", api_key, backend_model, text
+                )
+                path, err = _materialize_images_response(response, timestamp)
+            elif backend == "openai":
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    errors.append("openai: OPENAI_API_KEY not set")
+                    continue
+                response = _post_images_generations(
+                    os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                    api_key,
+                    backend_model,
+                    text,
+                )
+                path, err = _materialize_images_response(response, timestamp)
             else:
-                print(f"No choices in response. Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                path, err = _generate_image_openrouter(text, backend_model, timestamp)
+            if path:
                 return {
-                    "success": False,
-                    "error": "No choices in API response"
+                    "success": True,
+                    "image_path": path,
+                    "timestamp": timestamp,
+                    "model": backend_model,
+                    "backend": backend,
                 }
-        else:
-            error_msg = f"API error {response.status_code}: {response.text[:500]}"
-            print(f"Error generating image: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg
-            }
-            
-    except Exception as e:
-        print(f"Error generating image: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+            errors.append(f"{backend}/{backend_model}: {err}")
+            print(f"[Image] {backend}/{backend_model} failed: {err}")
+        except Exception as exc:
+            errors.append(f"{backend}/{backend_model}: {exc}")
+            print(f"[Image] {backend}/{backend_model} exception: {exc}")
+    return {
+        "success": False,
+        "error": " | ".join(errors) if errors else "No image backend available",
+    }
 
 # -------------------- Sora Video Utilities --------------------
 def ensure_videos_dir() -> Path:
@@ -1299,7 +1376,8 @@ def web_search(query: str, max_results: int = 5) -> dict:
         formatted_results = []
         
         # For queries about current events, use news search first
-        is_news_query = any(term in query.lower() for term in ["news", "today", "latest", "2025", "drama", "announcement", "release"])
+        news_terms = ["news", "today", "latest", "drama", "announcement", "release", str(datetime.now().year)]
+        is_news_query = any(term in query.lower() for term in news_terms)
         
         if is_news_query:
             print(f"[WebSearch] Detected news query, searching news first...")
@@ -1463,3 +1541,114 @@ def call_direct_provider_api(
     except Exception as e:
         print(f"[{provider}] Error: {e}")
         return f"Error calling {provider} ({model}): {str(e)}"
+
+
+def _is_public_host(hostname: str) -> bool:
+    """True only if every address the host resolves to is a public IP (blocks SSRF to local/private nets)."""
+    import ipaddress
+    import socket
+    if not hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split('%')[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return False
+    return True
+
+
+def fetch_url_text(url: str, max_chars: int = 3000, timeout: int = 12) -> dict:
+    """
+    Fetch a public web page and return a plain-text excerpt for the group chat.
+
+    Returns:
+        dict with keys: success, url, title, text, error
+    """
+    from html.parser import HTMLParser
+    from urllib.parse import urlparse, urljoin
+
+    url = (url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    max_bytes = 2_000_000
+
+    class _TextExtractor(HTMLParser):
+        SKIP = {"script", "style", "noscript", "svg", "head", "nav", "footer", "form"}
+
+        def __init__(self):
+            super().__init__()
+            self.parts, self.title, self._skip, self._in_title = [], "", 0, False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in self.SKIP:
+                self._skip += 1
+            if tag == "title":
+                self._in_title = True
+            if tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "tr", "div"):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in self.SKIP and self._skip:
+                self._skip -= 1
+            if tag == "title":
+                self._in_title = False
+
+        def handle_data(self, data):
+            if self._in_title:
+                self.title += data
+            elif not self._skip:
+                self.parts.append(data)
+
+    try:
+        # Follow redirects manually so every hop is checked against private networks
+        current = url
+        for _ in range(5):
+            parsed = urlparse(current)
+            if parsed.scheme not in ("http", "https") or not _is_public_host(parsed.hostname):
+                return {"success": False, "url": current, "error": "blocked (non-public or invalid host)"}
+            resp = requests.get(
+                current, timeout=timeout, stream=True, allow_redirects=False,
+                headers={"User-Agent": "Mozilla/5.0 (LiminalBackrooms agent fetch)"},
+            )
+            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                current = urljoin(current, resp.headers.get("Location", ""))
+                resp.close()
+                continue
+            break
+        else:
+            return {"success": False, "url": url, "error": "too many redirects"}
+
+        if resp.status_code >= 400:
+            return {"success": False, "url": current, "error": f"HTTP {resp.status_code}"}
+        content_type = resp.headers.get("Content-Type", "")
+        if not any(t in content_type for t in ("text/", "html", "json", "xml")):
+            return {"success": False, "url": current, "error": f"unsupported content type: {content_type or 'unknown'}"}
+
+        raw = b""
+        for chunk in resp.iter_content(65536):
+            raw += chunk
+            if len(raw) > max_bytes:
+                break
+        resp.close()
+        body = raw.decode(resp.encoding or "utf-8", errors="replace")
+
+        if "html" in content_type:
+            extractor = _TextExtractor()
+            extractor.feed(body)
+            title = re.sub(r"\s+", " ", extractor.title).strip()
+            text = "".join(extractor.parts)
+        else:
+            title, text = "", body
+        text = re.sub(r"[ \t\r\f\v]+", " ", text)
+        text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+        if len(text) > max_chars:
+            text = text[:max_chars].rsplit(" ", 1)[0] + " …"
+        if not text:
+            return {"success": False, "url": current, "error": "no readable text"}
+        return {"success": True, "url": current, "title": title, "text": text}
+    except requests.RequestException as e:
+        return {"success": False, "url": url, "error": str(e)[:200]}

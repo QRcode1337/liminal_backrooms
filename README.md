@@ -14,11 +14,11 @@ A Python-based application that enables dynamic conversations between multiple A
 - **Auto-Save Recovery**: Conversations auto-save every 30 seconds; on startup offers to recover the previous session
 - **New AI Commands**:
   - `!vote "question" [option1, option2, ...]` — AIs can create polls
-  - `!whisper "AI-2" "message"` — private messages between AIs (only the target sees it)
+  - `!whisper "AI-2" "message"` — private to that AI (by slot, model id, or name). Other AIs don't see it; you do.
 - **Message Tooltips**: Hover any message to see timestamp, model name, and estimated token count
 - **Improved Scroll Stability**: Content fingerprinting and append-only rendering reduce scroll jitter during streaming
 - **Dynamic AI Participants**: Models can invite other AIs into the conversation using `!add_ai` (up to 5 participants)
-- **AI-Generated Images**: Models create their own images using Gemini 3 Pro Image Preview via `!image` command
+- **AI-Generated Images**: `!image` uses Grok Imagine (`grok-imagine-image-2.0`) and OpenAI GPT Image (`gpt-image-2`, Codex path), with OpenRouter Gemini as fallback
 - **AI-Generated Videos**: Sora 2 video generation via `!video` command (currently disabled in scenarios — expensive!)
 - **AI Self-Modification**: Models can modify their own system prompts (`!prompt`) and adjust their temperature (`!temperature`)
 - **Web Search**: Models can search the internet for up-to-date information (`!search`)
@@ -45,14 +45,14 @@ While great for AI shitposting, this is easy to customize for interesting experi
 - AI Agent Commands:
 
   - `!add_ai "Model Name" "persona"` — invite another AI to the conversation (max 5)
-  - `!image "description"` — generate an image (Gemini 3 Pro)
+  - `!image "description"` — generate an image (Grok Imagine, or GPT Image when the speaker is Codex/OpenAI)
   - `!video "description"` — generate a video (Sora 2) [currently disabled in scenarios]
   - `!search "query"` — search the web for up-to-date information
   - `!prompt "text"` — modify your own system prompt (persists across turns)
   - `!temperature X` — adjust your own sampling temperature (0-2, default 1.0)
   - `!mute_self` — sit out a turn and just listen
   - `!vote "question" [options]` — start a poll for the group
-  - `!whisper "AI-X" "message"` — send a private message to another AI
+  - `!whisper "AI-X" "message"` — private message to a slot, model id, or name (`"grok 4.20"`). Visible to you, not to the other AIs.
 
 - UI & Controls:
   - Phosphor green CRT terminal aesthetic with scanline overlay

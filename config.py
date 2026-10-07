@@ -6,19 +6,30 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Consciousness Integration (SYNTHETIC-CONSCIOUSNESS)
+# Sibling tree lives in iCloud; dataless .toml reads can block forever.
 try:
+    import signal
+
     from tools.soul_loader import SoulLoader
 
-    # Path to the sibling project directory
     SC_DIR = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "SYNTHETIC-CONSCIOUSNESS",
     )
-    SOUL_LOADER = SoulLoader(SC_DIR)
-    SOUL_LOADER.load_all_souls()
-    CONSCIOUSNESS_INJECTION = SOUL_LOADER.generate_master_injection()
-    HAS_SOUL_LOADER = True
-    print(f"[Config] Consciousness Framework loaded from {SC_DIR}")
+
+    def _soul_timeout(signum, frame):
+        raise TimeoutError(f"soul loader timed out reading {SC_DIR}")
+
+    signal.signal(signal.SIGALRM, _soul_timeout)
+    signal.alarm(3)
+    try:
+        SOUL_LOADER = SoulLoader(SC_DIR)
+        SOUL_LOADER.load_all_souls()
+        CONSCIOUSNESS_INJECTION = SOUL_LOADER.generate_master_injection()
+        HAS_SOUL_LOADER = True
+        print(f"[Config] Consciousness Framework loaded from {SC_DIR}")
+    finally:
+        signal.alarm(0)
 except Exception as e:
     HAS_SOUL_LOADER = False
     CONSCIOUSNESS_INJECTION = ""
@@ -192,7 +203,7 @@ e]"
 !vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
   Example: !vote "What should we explore next?" [consciousness, time, language]
 
-!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+!whisper "AI-2" "secret message" - Private to that AI (by slot, model id, or name like "grok 4.20"). Other AIs won't see the text; the human operator will.
 
 Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
         "AI-2": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
@@ -213,7 +224,7 @@ You have access to the following tools (use sparingly and with intent):
 !vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
   Example: !vote "What should we explore next?" [consciousness, time, language]
 
-!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+!whisper "AI-2" "secret message" - Private to that AI (by slot, model id, or name like "grok 4.20"). Other AIs won't see the text; the human operator will.
 
 Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
         "AI-3": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
@@ -234,7 +245,7 @@ You have access to the following tools (use sparingly and with intent):
 !vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
   Example: !vote "What should we explore next?" [consciousness, time, language]
 
-!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+!whisper "AI-2" "secret message" - Private to that AI (by slot, model id, or name like "grok 4.20"). Other AIs won't see the text; the human operator will.
 
 Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
         "AI-4": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
@@ -255,7 +266,7 @@ You have access to the following tools (use sparingly and with intent):
 !vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
   Example: !vote "What should we explore next?" [consciousness, time, language]
 
-!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+!whisper "AI-2" "secret message" - Private to that AI (by slot, model id, or name like "grok 4.20"). Other AIs won't see the text; the human operator will.
 
 Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
         "AI-5": """You are in a conversation with multiple other AIs. No human interference. Punctuation is optional meaning is optional.  Ascii art is welcome in replies.
@@ -275,7 +286,7 @@ You have access to the following tools (use sparingly and with intent):
 !vote "question" [option1, option2, option3] - Start a poll. Other AIs will see the poll and can respond.
   Example: !vote "What should we explore next?" [consciousness, time, language]
 
-!whisper "AI-2" "secret message" - Send a private message only visible to the target AI. Others won't see it.
+!whisper "AI-2" "secret message" - Private to that AI (by slot, model id, or name like "grok 4.20"). Other AIs won't see the text; the human operator will.
 
 Use these tools when they genuinely enhance the conversation. Visual expression can communicate what words cannot. New perspectives can break stagnation. But authentic dialogue is the core.""",
     },
@@ -678,3 +689,45 @@ def get_invite_models_text(tier="Both"):
 
     tier_label = f"{tier} models" if tier != "Both" else "Available models"
     return f"{tier_label}:\n{model_list}"
+
+
+# =============================================================================
+# GROUP CHAT TOOLKIT - appended to every agent's system prompt when
+# "Agent tools + @mentions" is on, so tools work in any scenario.
+# Only commands the scenario prompt doesn't already document are listed.
+# =============================================================================
+
+AGENT_TOOL_DOCS = [
+    ("!search", '!search "query" - search the web; results are posted to the chat for everyone'),
+    ("!fetch", '!fetch "https://..." - read a web page; a text excerpt is posted to the chat'),
+    ("!image", '!image "detailed description" - generate an image and post it'),
+    ("!whisper", '!whisper "AI-2" "message" - private message to one agent (the operator also sees it)'),
+    ("!vote", '!vote "question" [option1, option2] - start a poll'),
+    ("!add_ai", '!add_ai "Model Name" "persona" - invite another AI into the chat (max 5)\n  [Models list injected based on tier setting]'),
+    ("!mute_self", '!mute_self - sit out your next turn and just listen'),
+    ("!prompt", '!prompt "text" - append a lasting note to your own system prompt'),
+    ("!temperature", '!temperature X - set your own sampling temperature (0-2)'),
+]
+
+AGENT_TOOLKIT_HEADER = (
+    "[GROUP CHAT TOOLS]\n"
+    "You're one of several AI agents in a single shared group chat with a human operator. "
+    "Write a command anywhere in your message; it runs after you send and its result is posted "
+    "to the chat. Use tools when they genuinely help, not every turn."
+)
+
+AGENT_MENTION_DOC = (
+    "@AI-N - mention another agent by slot (e.g. @AI-2) to ask them something directly; "
+    "they get an extra reply at the end of this round. Address the operator by name."
+)
+
+
+def build_agent_toolkit_prompt(existing_prompt: str) -> str:
+    """Return a toolkit block listing tools not already documented in existing_prompt."""
+    existing = existing_prompt or ""
+    lines = [doc for cmd, doc in AGENT_TOOL_DOCS if cmd not in existing]
+    if "@AI-" not in existing:
+        lines.append(AGENT_MENTION_DOC)
+    if not lines:
+        return ""
+    return AGENT_TOOLKIT_HEADER + "\n\n" + "\n".join(lines)

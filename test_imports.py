@@ -28,6 +28,7 @@ def test_imports():
         print("  - Importing shared_utils...")
         from shared_utils import (
             call_claude_api,
+            call_omniroute_api,
             call_openrouter_api,
             call_openai_api,
             generate_image_from_text
