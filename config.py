@@ -689,3 +689,45 @@ def get_invite_models_text(tier="Both"):
 
     tier_label = f"{tier} models" if tier != "Both" else "Available models"
     return f"{tier_label}:\n{model_list}"
+
+
+# =============================================================================
+# GROUP CHAT TOOLKIT - appended to every agent's system prompt when
+# "Agent tools + @mentions" is on, so tools work in any scenario.
+# Only commands the scenario prompt doesn't already document are listed.
+# =============================================================================
+
+AGENT_TOOL_DOCS = [
+    ("!search", '!search "query" - search the web; results are posted to the chat for everyone'),
+    ("!fetch", '!fetch "https://..." - read a web page; a text excerpt is posted to the chat'),
+    ("!image", '!image "detailed description" - generate an image and post it'),
+    ("!whisper", '!whisper "AI-2" "message" - private message to one agent (the operator also sees it)'),
+    ("!vote", '!vote "question" [option1, option2] - start a poll'),
+    ("!add_ai", '!add_ai "Model Name" "persona" - invite another AI into the chat (max 5)\n  [Models list injected based on tier setting]'),
+    ("!mute_self", '!mute_self - sit out your next turn and just listen'),
+    ("!prompt", '!prompt "text" - append a lasting note to your own system prompt'),
+    ("!temperature", '!temperature X - set your own sampling temperature (0-2)'),
+]
+
+AGENT_TOOLKIT_HEADER = (
+    "[GROUP CHAT TOOLS]\n"
+    "You're one of several AI agents in a single shared group chat with a human operator. "
+    "Write a command anywhere in your message; it runs after you send and its result is posted "
+    "to the chat. Use tools when they genuinely help, not every turn."
+)
+
+AGENT_MENTION_DOC = (
+    "@AI-N - mention another agent by slot (e.g. @AI-2) to ask them something directly; "
+    "they get an extra reply at the end of this round. Address the operator by name."
+)
+
+
+def build_agent_toolkit_prompt(existing_prompt: str) -> str:
+    """Return a toolkit block listing tools not already documented in existing_prompt."""
+    existing = existing_prompt or ""
+    lines = [doc for cmd, doc in AGENT_TOOL_DOCS if cmd not in existing]
+    if "@AI-" not in existing:
+        lines.append(AGENT_MENTION_DOC)
+    if not lines:
+        return ""
+    return AGENT_TOOLKIT_HEADER + "\n\n" + "\n".join(lines)

@@ -24,9 +24,9 @@ import sys
 import webbrowser
 import subprocess
 import base64
-from PyQt6.QtCore import Qt, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QSettings, QRect, QTimer, QRectF, QPointF, QSize, pyqtSignal, QEvent, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QFontDatabase, QTextCursor, QAction, QKeySequence, QTextCharFormat, QLinearGradient, QRadialGradient, QPainterPath, QImage, QPixmap, QShortcut
-from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout, QTextEdit, QFrame, QLineEdit, QPushButton, QLabel, QComboBox, QMenu, QFileDialog, QMessageBox, QScrollArea, QToolTip, QSizePolicy, QCheckBox, QGraphicsDropShadowEffect, QDialog, QPlainTextEdit
 
 from config import (
     AI_MODELS,
@@ -38,7 +38,7 @@ from config import (
 )
 
 # Import centralized styling - single source of truth for colors and widget styles
-from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style
+from styles import COLORS, FONTS, get_combobox_style, get_button_style, get_checkbox_style, get_scrollbar_style, get_input_style
 
 # Import shared utilities - with fallback for open_html_in_browser
 from shared_utils import generate_image_from_text
@@ -79,7 +79,7 @@ class MessageWidget(QFrame):
         5: COLORS['ai_5'],  # Near-white green
     }
     HUMAN_COLOR = COLORS['human']  # Amber
-    TIMESTAMP_COLOR = '#7a8899'  # Subtle readable gray
+    TIMESTAMP_COLOR = COLORS['text_timestamp']
     
     def __init__(self, message_data, parent=None):
         super().__init__(parent)
@@ -223,10 +223,10 @@ class MessageWidget(QFrame):
         result = []
         
         # Colors for code blocks
-        code_bg = '#001100'
-        header_bg = '#002200'
-        border_color = COLORS.get('border', '#0D3B0D')
-        code_text_color = '#E0E0E0'
+        code_bg = COLORS['code_bg']
+        header_bg = COLORS['code_header']
+        border_color = COLORS['border']
+        code_text_color = COLORS['text_normal']
         
         for part in parts:
             if part[0] == 'code_block':
@@ -339,7 +339,7 @@ class MessageWidget(QFrame):
     def _setup_branch_indicator(self, text):
         """Setup branch indicator style."""
         if "Rabbitholing" in text:
-            color = COLORS.get('accent_magenta', '#ff00ff')
+            color = COLORS.get('accent_magenta', COLORS['accent_violet'])
         else:
             color = COLORS.get('accent_cyan', '#00ffff')
         
@@ -361,14 +361,14 @@ class MessageWidget(QFrame):
         """Setup agent notification style with color-matching backgrounds."""
         command_success = self.message_data.get('_command_success')
         if command_success is False:
-            bg_color = "#1A0000"  # Dark red tint
-            border_color = "#ff4444"  # Bright red (distinct from human pink)
+            bg_color = COLORS['tint_error']
+            border_color = COLORS['notify_error']
         elif command_success is True:
-            bg_color = "#001A00"  # Dark green tint
-            border_color = COLORS.get('notify_success', '#5DFF44')
+            bg_color = COLORS['tint_success']
+            border_color = COLORS['notify_success']
         else:
-            bg_color = "#1A1A00"  # Dark yellow tint
-            border_color = COLORS.get('notify_info', '#FFFF48')
+            bg_color = COLORS['tint_info']
+            border_color = COLORS['notify_info']
         
         self.setStyleSheet(f"""
             MessageWidget {{
@@ -391,11 +391,11 @@ class MessageWidget(QFrame):
         to_model = self.message_data.get('_whisper_to_model', '')
         body = self.message_data.get('_whisper_text') or text
         dest = f"{to_name} ({to_model})" if to_model else to_name
-        color = COLORS.get('accent_yellow', '#CCFF00')
+        color = COLORS['accent_yellow']
 
         self.setStyleSheet(f"""
             MessageWidget {{
-                background-color: #121200;
+                background-color: {COLORS['tint_warn']};
                 border-left: 3px dashed {color};
                 border-radius: 0px;
             }}
@@ -1416,6 +1416,11 @@ def load_fonts():
         ("IosevkaTerm-Regular.ttf", "Iosevka Term"),
         ("IosevkaTerm-Bold.ttf", "Iosevka Term"),
         ("IosevkaTerm-Italic.ttf", "Iosevka Term"),
+        # Cypher OS faces (optional - drop the TTFs into fonts/ to bundle them)
+        ("JetBrainsMono-Regular.ttf", "JetBrains Mono"),
+        ("JetBrainsMono-Bold.ttf", "JetBrains Mono"),
+        ("ChakraPetch-SemiBold.ttf", "Chakra Petch"),
+        ("ChakraPetch-Bold.ttf", "Chakra Petch"),
     ]
     
     loaded_fonts = []
@@ -1495,14 +1500,14 @@ class DepthGauge(QWidget):
             
             # Color shifts based on depth - deeper = brighter green
             if progress < 0.33:
-                gradient.setColorAt(0, QColor('#00FF41'))
-                gradient.setColorAt(1, QColor('#006B1A'))
+                gradient.setColorAt(0, QColor(COLORS['ai_1']))
+                gradient.setColorAt(1, QColor(COLORS['accent_cyan_active']))
             elif progress < 0.66:
-                gradient.setColorAt(0, QColor('#33FF66'))
-                gradient.setColorAt(1, QColor('#00FF41'))
+                gradient.setColorAt(0, QColor(COLORS['ai_2']))
+                gradient.setColorAt(1, QColor(COLORS['ai_1']))
             else:
-                gradient.setColorAt(0, QColor('#CCFFEE'))
-                gradient.setColorAt(1, QColor('#33FF66'))
+                gradient.setColorAt(0, QColor(COLORS['ai_3']))
+                gradient.setColorAt(1, QColor(COLORS['ai_2']))
             
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(gradient)
@@ -1510,7 +1515,7 @@ class DepthGauge(QWidget):
             
             # Pulsing glow line at top of fill
             pulse_alpha = int(100 + 80 * math.sin(math.radians(self.pulse_offset)))
-            glow_color = QColor('#00FF41')
+            glow_color = QColor(COLORS['accent_cyan'])
             glow_color.setAlpha(pulse_alpha)
             painter.setPen(QPen(glow_color, 2))
             painter.drawLine(margin + 2, fill_y, margin + gauge_width - 2, fill_y)
@@ -2198,16 +2203,17 @@ class NetworkPane(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         
         # Title with consistent tab header styling
-        title = QLabel("PROPAGATION NETWORK")
+        title = QLabel("NET.GRAPH")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 13px;
+            font-family: {FONTS['family_display']};
+            font-size: 12px;
             font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+            letter-spacing: 2px;
             text-transform: uppercase;
         """)
         layout.addWidget(title)
@@ -2377,16 +2383,17 @@ class ImagePreviewPane(QWidget):
         layout.setSpacing(10)
         
         # Title with consistent tab header styling
-        self.title = QLabel("GENERATED IMAGES")
+        self.title = QLabel("MEDIA.VIEW · IMAGES")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 13px;
+            font-family: {FONTS['family_display']};
+            font-size: 12px;
             font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+            letter-spacing: 2px;
             text-transform: uppercase;
         """)
         layout.addWidget(self.title)
@@ -2671,16 +2678,17 @@ class VideoPreviewPane(QWidget):
         layout.setSpacing(10)
         
         # Title with consistent tab header styling
-        self.title = QLabel("GENERATED VIDEOS")
+        self.title = QLabel("MEDIA.VIEW · VIDEOS")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 13px;
+            font-family: {FONTS['family_display']};
+            font-size: 12px;
             font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+            letter-spacing: 2px;
             text-transform: uppercase;
         """)
         layout.addWidget(self.title)
@@ -2994,16 +3002,17 @@ class StatsWidget(QWidget):
         layout.setSpacing(6)
 
         # Title
-        title = QLabel("LIVE STATS")
+        title = QLabel("SYS.MONITOR")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 13px;
+            font-family: {FONTS['family_display']};
+            font-size: 12px;
             font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+            letter-spacing: 2px;
         """)
         layout.addWidget(title)
 
@@ -3411,10 +3420,101 @@ class RetroSlider(QWidget):
         painter.end()
 
 
+class AgentPromptDialog(QDialog):
+    """Cypher OS window for editing one agent's operator-set system prompt."""
+
+    def __init__(self, ai_name, model_label, text="", replace=False, parent=None):
+        super().__init__(parent)
+        num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
+        color = COLORS.get(f'ai_{num}', COLORS['accent_cyan'])
+        self.setWindowTitle(f"{ai_name} · system prompt")
+        self.setMinimumSize(520, 420)
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {COLORS['bg_medium']}; border: 1px solid {color}; }}
+            QLabel {{ background: transparent; }}
+            {get_input_style()}
+            QPlainTextEdit {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border_glow']};
+                padding: 8px;
+                font-family: {FONTS['family_mono']};
+                font-size: 12px;
+            }}
+            QPlainTextEdit:focus {{ border: 1px solid {color}; }}
+            {get_checkbox_style()}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 12)
+        layout.setSpacing(10)
+
+        title = QLabel(f"{ai_name}  ·  SYS.PROMPT")
+        title.setStyleSheet(f"""
+            color: {color};
+            font-family: {FONTS['family_display']};
+            font-size: 12px; font-weight: bold; letter-spacing: 2px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+        """)
+        layout.addWidget(title)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(12, 0, 12, 0)
+        body.setSpacing(8)
+
+        hint = QLabel(f"Model: {model_label}\nSent as this agent's system prompt on every turn.")
+        hint.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
+        body.addWidget(hint)
+
+        self.editor = QPlainTextEdit()
+        self.editor.setPlaceholderText(
+            "e.g. You're the group's skeptic. Push back on easy agreement, "
+            "cite sources with !search, and @mention whoever you're answering."
+        )
+        self.editor.setPlainText(text)
+        body.addWidget(self.editor, 1)
+
+        self.replace_checkbox = QCheckBox("Replace the scenario prompt (otherwise added on top of it)")
+        self.replace_checkbox.setChecked(replace)
+        body.addWidget(self.replace_checkbox)
+
+        buttons = QHBoxLayout()
+        clear_btn = QPushButton("CLEAR")
+        clear_btn.setStyleSheet(get_button_style(COLORS['text_dim']))
+        clear_btn.clicked.connect(self.editor.clear)
+        cancel_btn = QPushButton("CANCEL")
+        cancel_btn.setStyleSheet(get_button_style(COLORS['text_dim']))
+        cancel_btn.clicked.connect(self.reject)
+        save_btn = QPushButton("SAVE ▸")
+        save_btn.setStyleSheet(get_button_style(color))
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(self.accept)
+        buttons.addWidget(clear_btn)
+        buttons.addStretch()
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(save_btn)
+        body.addLayout(buttons)
+
+        layout.addLayout(body, 1)
+
+    def values(self):
+        return self.editor.toPlainText().strip(), self.replace_checkbox.isChecked()
+
+
 class ControlPanel(QWidget):
     """Control panel with mode, model selections, etc."""
     def __init__(self):
         super().__init__()
+
+        # Operator-set prompts. Plain Python values so worker threads can read them safely.
+        self.agent_system_prompts = {f"AI-{i}": {"text": "", "replace": False} for i in range(1, 6)}
+        self.briefing_prompt = ""
+        self.agent_tools_enabled = True
+        self._agent_prompt_buttons = {}
+        self._settings = QSettings("LiminalBackrooms", "CypherOS")
+        self._load_agent_prompts()
         
         # Set up the UI
         self.setup_ui()
@@ -3423,38 +3523,26 @@ class ControlPanel(QWidget):
         self.initialize_selectors()
     
     def _ascii_section_header(self, text, width=26):
-        """Create an ASCII box-drawing section header label."""
-        inner = f" {text} "
-        remaining = width - len(inner) - 2
-        left_dashes = remaining // 2
-        right_dashes = remaining - left_dashes
-        dash = "\u2500"
-        line = "\u250c" + dash * left_dashes + inner + dash * right_dashes + "\u2510"
-        label = QLabel(line)
+        """Cypher OS section label: dim, tracked caps over a hairline."""
+        label = QLabel(f"// {text}")
         label.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
-            font-family: {FONTS['family_mono']};
+            color: {COLORS['text_dim']};
+            font-family: {FONTS['family_display']};
             font-size: 10px;
             font-weight: bold;
-            letter-spacing: 0px;
+            letter-spacing: 2px;
             background-color: transparent;
-            padding: 2px 0px;
+            border-bottom: 1px solid {COLORS['border']};
+            padding: 4px 0px 4px 0px;
         """)
         return label
 
     def _ascii_divider(self, width=26):
-        """Create an ASCII box-drawing divider."""
-        dash = "\u2500"
-        line = "\u251c" + dash * (width - 2) + "\u2524"
-        label = QLabel(line)
-        label.setStyleSheet(f"""
-            color: {COLORS['border_glow']};
-            font-family: {FONTS['family_mono']};
-            font-size: 10px;
-            background-color: transparent;
-            padding: 4px 0px 2px 0px;
-        """)
-        return label
+        """Hairline spacer between control groups."""
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background-color: {COLORS['border']}; border: none; margin: 6px 0px;")
+        return line
 
     def setup_ui(self):
         """Set up the user interface for the control panel - vertical sidebar layout"""
@@ -3464,16 +3552,17 @@ class ControlPanel(QWidget):
         main_layout.setSpacing(10)
         
         # Add a title with consistent tab header styling
-        title = QLabel("CONTROL PANEL")
+        title = QLabel("CTRL.PANEL")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
-            font-size: 13px;
+            font-family: {FONTS['family_display']};
+            font-size: 12px;
             font-weight: bold;
-            padding: 12px;
-            background-color: {COLORS['bg_medium']};
-            border-bottom: 1px solid {COLORS['border_glow']};
-            letter-spacing: 3px;
+            padding: 10px 12px;
+            background-color: {COLORS['bg_titlebar']};
+            border-bottom: 1px solid {COLORS['border']};
+            letter-spacing: 2px;
             text-transform: uppercase;
         """)
         main_layout.addWidget(title)
@@ -3646,8 +3735,8 @@ class ControlPanel(QWidget):
                 color: {COLORS['text_normal']};
             }}
             QPushButton:checked {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_bright']};
+                background-color: {COLORS['accent_cyan']};
+                color: {COLORS['bg_dark']};
                 border: 1px solid {COLORS['accent_cyan']};
             }}
         """
@@ -3659,12 +3748,7 @@ class ControlPanel(QWidget):
             btn_group_layout.addWidget(btn)
         
         # Round corners on first and last buttons
-        self.invite_sota_btn.setStyleSheet(toggle_btn_style + """
-            QPushButton { border-radius: 3px 0px 0px 3px; }
-        """)
-        self.invite_both_btn.setStyleSheet(toggle_btn_style + """
-            QPushButton { border-radius: 0px 3px 3px 0px; }
-        """)
+
 
         # Set default selection (SOTA)
         self.invite_sota_btn.setChecked(True)
@@ -3690,9 +3774,7 @@ class ControlPanel(QWidget):
         ai1_layout.setContentsMargins(0, 0, 0, 0)
         ai1_layout.setSpacing(5)
         
-        ai1_label = QLabel("AI-1")
-        ai1_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai1_layout.addWidget(ai1_label)
+        ai1_layout.addWidget(self._agent_header("AI-1"))
         
         self.ai1_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
         self.ai1_model_selector.setStyleSheet(get_combobox_style())
@@ -3704,9 +3786,7 @@ class ControlPanel(QWidget):
         ai2_layout.setContentsMargins(0, 0, 0, 0)
         ai2_layout.setSpacing(5)
         
-        ai2_label = QLabel("AI-2")
-        ai2_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai2_layout.addWidget(ai2_label)
+        ai2_layout.addWidget(self._agent_header("AI-2"))
         
         self.ai2_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
         self.ai2_model_selector.setStyleSheet(get_combobox_style())
@@ -3718,9 +3798,7 @@ class ControlPanel(QWidget):
         ai3_layout.setContentsMargins(0, 0, 0, 0)
         ai3_layout.setSpacing(5)
         
-        ai3_label = QLabel("AI-3")
-        ai3_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai3_layout.addWidget(ai3_label)
+        ai3_layout.addWidget(self._agent_header("AI-3"))
         
         self.ai3_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
         self.ai3_model_selector.setStyleSheet(get_combobox_style())
@@ -3732,9 +3810,7 @@ class ControlPanel(QWidget):
         ai4_layout.setContentsMargins(0, 0, 0, 0)
         ai4_layout.setSpacing(5)
         
-        ai4_label = QLabel("AI-4")
-        ai4_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai4_layout.addWidget(ai4_label)
+        ai4_layout.addWidget(self._agent_header("AI-4"))
         
         self.ai4_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
         self.ai4_model_selector.setStyleSheet(get_combobox_style())
@@ -3746,9 +3822,7 @@ class ControlPanel(QWidget):
         ai5_layout.setContentsMargins(0, 0, 0, 0)
         ai5_layout.setSpacing(5)
         
-        ai5_label = QLabel("AI-5")
-        ai5_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px;")
-        ai5_layout.addWidget(ai5_label)
+        ai5_layout.addWidget(self._agent_header("AI-5"))
         
         self.ai5_model_selector = GroupedModelComboBox(colors=COLORS, parent=self)
         self.ai5_model_selector.setStyleSheet(get_combobox_style())
@@ -3797,6 +3871,37 @@ class ControlPanel(QWidget):
         controls_layout.addWidget(scenario_label)
         
         controls_layout.addWidget(prompt_container)
+
+        # BRIEFING - shared prompt each agent reads before its first turn only
+        briefing_label = self._ascii_section_header("BRIEFING")
+        controls_layout.addWidget(briefing_label)
+
+        briefing_info = QLabel("Every agent reads this once, before its first turn")
+        briefing_info.setWordWrap(True)
+        briefing_info.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px;")
+        controls_layout.addWidget(briefing_info)
+
+        self.briefing_input = QPlainTextEdit()
+        self.briefing_input.setPlaceholderText(
+            "e.g. You're all in one group chat with the operator. Keep replies short, "
+            "@mention whoever you're answering, and use tools when they help."
+        )
+        self.briefing_input.setPlainText(self.briefing_prompt)
+        self.briefing_input.setFixedHeight(96)
+        self.briefing_input.setToolTip("Injected into each agent's system prompt on its first turn only")
+        self.briefing_input.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: {COLORS['bg_dark']};
+                color: {COLORS['text_normal']};
+                border: 1px solid {COLORS['border_glow']};
+                padding: 6px;
+                font-family: {FONTS['family_mono']};
+                font-size: 11px;
+            }}
+            QPlainTextEdit:focus {{ border: 1px solid {COLORS['accent_cyan']}; }}
+        """)
+        self.briefing_input.textChanged.connect(self._on_briefing_changed)
+        controls_layout.addWidget(self.briefing_input)
         
         # Divider
         divider3 = self._ascii_divider()
@@ -3811,6 +3916,17 @@ class ControlPanel(QWidget):
         self.auto_image_checkbox.setStyleSheet(get_checkbox_style())
         self.auto_image_checkbox.setToolTip("Automatically generate images from AI responses using Google Gemini 3 Pro Image Preview via OpenRouter")
         controls_layout.addWidget(self.auto_image_checkbox)
+
+        # Agent tools (group-chat bot mode)
+        self.agent_tools_checkbox = QCheckBox("Agent tools + @mentions")
+        self.agent_tools_checkbox.setChecked(self.agent_tools_enabled)
+        self.agent_tools_checkbox.setStyleSheet(get_checkbox_style())
+        self.agent_tools_checkbox.setToolTip(
+            "Give every agent the tool list (!search, !fetch, !image, !whisper, !vote…) in any scenario,\n"
+            "and let agents summon each other with @AI-N for a reply at the end of the round."
+        )
+        self.agent_tools_checkbox.toggled.connect(self._on_agent_tools_toggled)
+        controls_layout.addWidget(self.agent_tools_checkbox)
         
         # Add spacer to push content to top
         controls_layout.addStretch()
@@ -3904,6 +4020,118 @@ class ControlPanel(QWidget):
         """Return the user's display name, defaulting to 'Human User'."""
         name = self.username_input.text().strip()
         return name if name else "Human User"
+
+    # ── Operator prompts (per-agent system prompts + shared briefing) ──
+
+    def _agent_header(self, ai_name):
+        """Agent row header: colored tag + SYS prompt button."""
+        num = int(ai_name.split('-')[1])
+        color = COLORS.get(f'ai_{num}', COLORS['accent_cyan'])
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        tag = QLabel(ai_name)
+        tag.setStyleSheet(f"""
+            color: {COLORS['bg_dark']};
+            background-color: {color};
+            font-weight: bold;
+            font-size: 10px;
+            padding: 2px 6px;
+        """)
+        row_layout.addWidget(tag)
+        row_layout.addStretch()
+
+        btn = QPushButton()
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setAccessibleName(f"Edit {ai_name} system prompt")
+        btn.clicked.connect(lambda _checked=False, n=ai_name: self._edit_agent_prompt(n))
+        self._agent_prompt_buttons[ai_name] = btn
+        self._refresh_agent_prompt_button(ai_name)
+        row_layout.addWidget(btn)
+        return row
+
+    def _refresh_agent_prompt_button(self, ai_name):
+        btn = self._agent_prompt_buttons.get(ai_name)
+        if btn is None:
+            return
+        num = int(ai_name.split('-')[1])
+        color = COLORS.get(f'ai_{num}', COLORS['accent_cyan'])
+        entry = self.agent_system_prompts.get(ai_name, {})
+        is_set = bool(entry.get("text"))
+        if is_set:
+            mode = "replaces scenario" if entry.get("replace") else "added to scenario"
+            btn.setText("SYS ●")
+            btn.setToolTip(f"{ai_name} has a custom system prompt ({mode}). Click to edit.")
+            fg, bg, border = COLORS['bg_dark'], color, color
+        else:
+            btn.setText("SYS")
+            btn.setToolTip(f"Set a system prompt for {ai_name}")
+            fg, bg, border = COLORS['text_dim'], 'transparent', COLORS['border_glow']
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {fg}; background-color: {bg};
+                border: 1px solid {border};
+                font-family: {FONTS['family_display']};
+                font-size: 9px; font-weight: bold; letter-spacing: 1px;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{ border: 1px solid {color}; color: {COLORS['text_bright'] if not is_set else fg}; }}
+        """)
+
+    def _edit_agent_prompt(self, ai_name):
+        num = int(ai_name.split('-')[1])
+        selector = getattr(self, f"ai{num}_model_selector", None)
+        model_label = selector.currentText() if selector is not None else "—"
+        entry = self.agent_system_prompts.get(ai_name, {"text": "", "replace": False})
+        dialog = AgentPromptDialog(ai_name, model_label, entry.get("text", ""), entry.get("replace", False), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            text, replace = dialog.values()
+            self.agent_system_prompts[ai_name] = {"text": text, "replace": replace and bool(text)}
+            self._refresh_agent_prompt_button(ai_name)
+            self._save_agent_prompts()
+
+    def _on_briefing_changed(self):
+        self.briefing_prompt = self.briefing_input.toPlainText().strip()
+        self._save_agent_prompts()
+
+    def _on_agent_tools_toggled(self, checked):
+        self.agent_tools_enabled = bool(checked)
+        self._save_agent_prompts()
+
+    def _load_agent_prompts(self):
+        try:
+            raw = self._settings.value("agent_system_prompts", "")
+            if raw:
+                data = json.loads(raw)
+                for name, entry in data.items():
+                    if name in self.agent_system_prompts and isinstance(entry, dict):
+                        self.agent_system_prompts[name] = {
+                            "text": str(entry.get("text", "")),
+                            "replace": bool(entry.get("replace", False)),
+                        }
+            self.briefing_prompt = str(self._settings.value("briefing_prompt", "") or "")
+            tools = self._settings.value("agent_tools_enabled", "true")
+            self.agent_tools_enabled = str(tools).lower() != "false"
+        except Exception as e:
+            print(f"[ControlPanel] Could not load saved agent prompts: {e}")
+
+    def _save_agent_prompts(self):
+        self._settings.setValue("agent_system_prompts", json.dumps(self.agent_system_prompts))
+        self._settings.setValue("briefing_prompt", self.briefing_prompt)
+        self._settings.setValue("agent_tools_enabled", "true" if self.agent_tools_enabled else "false")
+
+    def get_agent_system_prompt(self, ai_name):
+        """Return (text, replace) for an agent's operator-set system prompt."""
+        entry = self.agent_system_prompts.get(ai_name) or {}
+        return entry.get("text", ""), bool(entry.get("replace", False))
+
+    def get_briefing_prompt(self):
+        return self.briefing_prompt
+
+    def tools_enabled(self):
+        return self.agent_tools_enabled
 
     def initialize_selectors(self):
         """Initialize the selector dropdowns with values from config"""
@@ -4103,18 +4331,19 @@ class ConversationPane(QWidget):
         
         # Title and info area
         title_layout = QHBoxLayout()
-        self.title_label = QLabel("╔═ LIMINAL BACKROOMS ═╗")
+        self.title_label = QLabel("◆ CYPHER//OS  ~/backrooms")
         self.title_label.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
+            font-family: {FONTS['family_display']};
             font-size: 14px;
             font-weight: bold;
             padding: 4px;
-            letter-spacing: 2px;
+            letter-spacing: 3px;
         """)
         
-        self.info_label = QLabel("[ AI-TO-AI CONVERSATION ]")
+        self.info_label = QLabel("ai ↔ ai · group chat")
         self.info_label.setStyleSheet(f"""
-            color: {COLORS['text_glow']};
+            color: {COLORS['text_dim']};
             font-size: 10px;
             padding: 2px;
             letter-spacing: 1px;
@@ -4901,16 +5130,16 @@ body {{
         html += f".rabbithole {{ color: {COLORS['accent_green']}; }}"
         html += f".fork {{ color: {COLORS['accent_yellow']}; }}"
         # Notification styles - error (pink), success (green), info (yellow)
-        html += f".notify-error {{ background-color: #1A0000; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
-        html += f".notify-success {{ background-color: #001A00; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
-        html += f".notify-info {{ background-color: #1A1A00; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".notify-error {{ background-color: {COLORS['tint_error']}; border-left: 3px solid {COLORS['notify_error']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_error']}; border-radius: 0px; }}"
+        html += f".notify-success {{ background-color: {COLORS['tint_success']}; border-left: 3px solid {COLORS['notify_success']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_success']}; border-radius: 0px; }}"
+        html += f".notify-info {{ background-color: {COLORS['tint_info']}; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Legacy agent-notification class (defaults to info style)
-        html += f".agent-notification {{ background-color: #1A1A00; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
+        html += f".agent-notification {{ background-color: {COLORS['tint_info']}; border-left: 3px solid {COLORS['notify_info']}; padding: 10px 12px; margin: 12px 4px; color: {COLORS['notify_info']}; border-radius: 0px; }}"
         # Code block styling - indented, visually distinct, contained within message
-        html += f"pre {{ background-color: #001100; border: 1px solid #0D3B0D; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 4px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
+        html += f"pre {{ background-color: {COLORS['code_bg']}; border: 1px solid {COLORS['border']}; border-left: 3px solid {COLORS['accent_purple']}; border-radius: 0px; padding: 12px 14px; margin: 12px 0 12px 12px; overflow-x: auto; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }}"
         html += f"code {{ font-family: 'Consolas', 'Monaco', 'Courier New', monospace; color: {COLORS['text_bright']}; font-size: 13px; line-height: 1.5; }}"
         # Inline code (not in pre block) - subtle background
-        html += f".inline-code {{ background-color: #001100; color: #00FF41; border: 1px solid #0D3B0D; border-radius: 3px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
+        html += f".inline-code {{ background-color: {COLORS['code_bg']}; color: {COLORS['accent_cyan']}; border: 1px solid {COLORS['border']}; border-radius: 0px; padding: 2px 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 12px; }}"
         # Typing indicator styles
         html += f".typing-indicator {{ background-color: {COLORS['bg_medium']}; padding: 10px 12px; border-radius: 0px; margin: 12px 4px; }}"
         html += f".typing-dots {{ color: {COLORS['text_dim']}; font-style: italic; }}"
@@ -5134,22 +5363,22 @@ body {{
                 lang_header = ''
                 if language:
                     lang_header = (
-                        f'<div style="background-color: #002200; padding: 6px 12px; '
-                        f'border-bottom: 1px solid #0D3B0D;">'
-                        f'<span style="color: #64748B; font-size: 11px; '
+                        f'<div style="background-color: {COLORS["code_header"]}; padding: 6px 12px; '
+                        f'border-bottom: 1px solid {COLORS["border"]};">'
+                        f'<span style="color: {COLORS["text_dim"]}; font-size: 11px; '
                         f'font-family: Consolas, Monaco, monospace; font-weight: bold; '
                         f'text-transform: uppercase;">{escape(language)}</span></div>'
                     )
                 
                 # Build code block - simple, no syntax highlighting to avoid regex issues
                 result.append(
-                    f'<div style="background-color: #001100; border: 1px solid #0D3B0D; '
-                    f'border-radius: 4px; margin: 12px 0 12px 10px; overflow: hidden;">'
+                    f'<div style="background-color: {COLORS["code_bg"]}; border: 1px solid {COLORS["border"]}; '
+                    f'border-radius: 0px; margin: 12px 0 12px 10px; overflow: hidden;">'
                     f'{lang_header}'
                     f'<pre style="margin: 0; padding: 12px 14px; background: transparent; '
                     f'font-family: Consolas, Monaco, monospace; font-size: 13px; '
                     f'line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; '
-                    f'color: #E0E0E0;">{escaped_code}</pre></div>'
+                    f'color: {COLORS["text_normal"]};">{escaped_code}</pre></div>'
                 )
             else:
                 # Regular text - escape and process
@@ -5162,8 +5391,8 @@ body {{
                 # Process inline code
                 text_part = re.sub(
                     r'`([^`\n]+)`',
-                    r'<code style="background-color: #001100; color: #00FF41; padding: 2px 6px; '
-                    r'border-radius: 3px; font-family: Consolas, Monaco, monospace; font-size: 12px;">\1</code>',
+                    '<code style="background-color: ' + COLORS['code_bg'] + '; color: ' + COLORS['accent_cyan'] + '; padding: 2px 6px; '
+                    r'border-radius: 0px; font-family: Consolas, Monaco, monospace; font-size: 12px;">\1</code>',
                     text_part
                 )
                 
@@ -5345,7 +5574,7 @@ body {{
             self.title_label.setText(f"{branch_emoji} {branch_type.capitalize()}: {selected_text[:30]}...")
             self.info_label.setText(f"Branch conversation")
         else:
-            self.title_label.setText("Liminal Backrooms")
+            self.title_label.setText("◆ CYPHER//OS  ~/backrooms")
             # Don't override info_label here - let mode selector control it
         
         # Debug: Print conversation to console
@@ -5585,19 +5814,20 @@ class CentralContainer(QWidget):
         
         # More visible atmospheric colors with green tint
         pulse = 0.5 + 0.5 * math.sin(math.radians(self.bg_offset * 2))
-        center_r = int(0 + 5 * pulse)
-        center_g = int(15 + 20 * pulse)
-        center_b = int(0 + 5 * pulse)
+        center_r = int(9 + 3 * pulse)
+        center_g = int(12 + 5 * pulse)
+        center_b = int(17 + 6 * pulse)
         
         gradient.setColorAt(0, QColor(center_r, center_g, center_b))
-        gradient.setColorAt(0.4, QColor(2, 12, 4))
-        gradient.setColorAt(1, QColor(1, 6, 2))
+        gradient.setColorAt(0.4, QColor(7, 9, 13))
+        gradient.setColorAt(1, QColor(6, 8, 11))
         
         painter.fillRect(self.rect(), gradient)
         
         # Add subtle glow lines at edges
         glow_alpha = int(15 + 10 * pulse)
-        glow_color = QColor(0, 255, 65, glow_alpha)  # Green glow
+        glow_color = QColor(COLORS['accent_cyan'])
+        glow_color.setAlpha(glow_alpha)
         painter.setPen(QPen(glow_color, 2))
         
         # Top edge glow
@@ -5632,7 +5862,7 @@ class ScanlineOverlayWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.scanline_offset = 0
-        self.intensity = 0.25  # More visible scanlines
+        self.intensity = 0.14  # Faint Cypher OS scanlines
         
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._animate)
@@ -5711,7 +5941,7 @@ class LiminalBackroomsApp(QMainWindow):
     
     def setup_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("╔═ LIMINAL BACKROOMS v0.7 ═╗")
+        self.setWindowTitle("CYPHER//OS — LIMINAL BACKROOMS v0.7")
         self.setGeometry(100, 100, 1600, 900)  # Initial size before maximizing
         self.setMinimumSize(1200, 800)
         

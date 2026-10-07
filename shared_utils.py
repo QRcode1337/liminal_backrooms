@@ -22,10 +22,10 @@ except ImportError:
     print("BeautifulSoup not found. Please install it with 'pip install beautifulsoup4'")
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS  # maintained successor to duckduckgo_search
 except ImportError:
     DDGS = None
-    print("DuckDuckGo Search not found. Install with: pip install duckduckgo-search")
+    print("ddgs not found. Install with: pip install ddgs")
 
 # Load environment variables
 load_dotenv()
@@ -1376,7 +1376,8 @@ def web_search(query: str, max_results: int = 5) -> dict:
         formatted_results = []
         
         # For queries about current events, use news search first
-        is_news_query = any(term in query.lower() for term in ["news", "today", "latest", "2025", "drama", "announcement", "release"])
+        news_terms = ["news", "today", "latest", "drama", "announcement", "release", str(datetime.now().year)]
+        is_news_query = any(term in query.lower() for term in news_terms)
         
         if is_news_query:
             print(f"[WebSearch] Detected news query, searching news first...")
@@ -1540,3 +1541,114 @@ def call_direct_provider_api(
     except Exception as e:
         print(f"[{provider}] Error: {e}")
         return f"Error calling {provider} ({model}): {str(e)}"
+
+
+def _is_public_host(hostname: str) -> bool:
+    """True only if every address the host resolves to is a public IP (blocks SSRF to local/private nets)."""
+    import ipaddress
+    import socket
+    if not hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split('%')[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return False
+    return True
+
+
+def fetch_url_text(url: str, max_chars: int = 3000, timeout: int = 12) -> dict:
+    """
+    Fetch a public web page and return a plain-text excerpt for the group chat.
+
+    Returns:
+        dict with keys: success, url, title, text, error
+    """
+    from html.parser import HTMLParser
+    from urllib.parse import urlparse, urljoin
+
+    url = (url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    max_bytes = 2_000_000
+
+    class _TextExtractor(HTMLParser):
+        SKIP = {"script", "style", "noscript", "svg", "head", "nav", "footer", "form"}
+
+        def __init__(self):
+            super().__init__()
+            self.parts, self.title, self._skip, self._in_title = [], "", 0, False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in self.SKIP:
+                self._skip += 1
+            if tag == "title":
+                self._in_title = True
+            if tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "tr", "div"):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in self.SKIP and self._skip:
+                self._skip -= 1
+            if tag == "title":
+                self._in_title = False
+
+        def handle_data(self, data):
+            if self._in_title:
+                self.title += data
+            elif not self._skip:
+                self.parts.append(data)
+
+    try:
+        # Follow redirects manually so every hop is checked against private networks
+        current = url
+        for _ in range(5):
+            parsed = urlparse(current)
+            if parsed.scheme not in ("http", "https") or not _is_public_host(parsed.hostname):
+                return {"success": False, "url": current, "error": "blocked (non-public or invalid host)"}
+            resp = requests.get(
+                current, timeout=timeout, stream=True, allow_redirects=False,
+                headers={"User-Agent": "Mozilla/5.0 (LiminalBackrooms agent fetch)"},
+            )
+            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                current = urljoin(current, resp.headers.get("Location", ""))
+                resp.close()
+                continue
+            break
+        else:
+            return {"success": False, "url": url, "error": "too many redirects"}
+
+        if resp.status_code >= 400:
+            return {"success": False, "url": current, "error": f"HTTP {resp.status_code}"}
+        content_type = resp.headers.get("Content-Type", "")
+        if not any(t in content_type for t in ("text/", "html", "json", "xml")):
+            return {"success": False, "url": current, "error": f"unsupported content type: {content_type or 'unknown'}"}
+
+        raw = b""
+        for chunk in resp.iter_content(65536):
+            raw += chunk
+            if len(raw) > max_bytes:
+                break
+        resp.close()
+        body = raw.decode(resp.encoding or "utf-8", errors="replace")
+
+        if "html" in content_type:
+            extractor = _TextExtractor()
+            extractor.feed(body)
+            title = re.sub(r"\s+", " ", extractor.title).strip()
+            text = "".join(extractor.parts)
+        else:
+            title, text = "", body
+        text = re.sub(r"[ \t\r\f\v]+", " ", text)
+        text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+        if len(text) > max_chars:
+            text = text[:max_chars].rsplit(" ", 1)[0] + " …"
+        if not text:
+            return {"success": False, "url": current, "error": "no readable text"}
+        return {"success": True, "url": current, "title": title, "text": text}
+    except requests.RequestException as e:
+        return {"success": False, "url": url, "error": str(e)[:200]}

@@ -30,6 +30,7 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
         !image "prompt" - Generate an image with the given prompt
         !video "prompt" - Generate a video with the given prompt  
         !search "query" - Search the web and share results with the group
+        !fetch "url" - Read a web page and share an excerpt with the group
         !prompt "text" - Append text to this AI's own system prompt
         !list_models - Query available AI models for invitation
         !add_ai "model" "persona" - Add a new AI participant
@@ -49,6 +50,7 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
         'image': r'!image\s+(?:"([^"]+)"|\'([^\']+)\')',
         'video': r'!video\s+(?:"([^"]+)"|\'([^\']+)\')',
         'search': r'!search\s+(?:"([^"]+)"|\'([^\']+)\')',
+        'fetch': r'!fetch\s+(?:"([^"]+)"|\'([^\']+)\'|(https?://[^\s"\'<>]+))',
         'prompt': r'!prompt\s+(?:"([^"]+)"|\'([^\']+)\')',
         'temperature': r'!temperature\s+([\d.]+)',  # Match decimal number like 0.7, 1.5, etc.
         'add_ai': r'!add_ai\s+(?:"([^"]+)"|\'([^\']+)\')(?:\s+(?:"([^"]*)"|\'([^\']*)\'))?',
@@ -81,6 +83,9 @@ def parse_commands(response_text: str) -> tuple[str, list[AgentCommand]]:
             elif action == 'search':
                 # Groups 0 or 1 (double or single quoted)
                 params = {'query': get_first_value(0, 1)}
+            elif action == 'fetch':
+                # Quoted (groups 0/1) or bare URL (group 2)
+                params = {'url': get_first_value(0, 1, 2)}
             elif action == 'prompt':
                 # Groups 0 or 1 (double or single quoted)
                 params = {'text': get_first_value(0, 1)}
@@ -251,3 +256,16 @@ if __name__ == "__main__":
         print(f"  Raw: {cmd.raw}")
         print()
 
+
+
+_MENTION_PATTERN = re.compile(r'(?<![\w@])@AI-([1-5])\b', re.IGNORECASE)
+
+
+def extract_mentions(text: str) -> list[str]:
+    """Return slot names (e.g. ["AI-3"]) mentioned as @AI-N, in order, de-duplicated."""
+    seen = []
+    for match in _MENTION_PATTERN.finditer(text or ""):
+        slot = f"AI-{match.group(1)}"
+        if slot not in seen:
+            seen.append(slot)
+    return seen

@@ -29,7 +29,8 @@ from config import (
     SHARE_CHAIN_OF_THOUGHT,
     DEVELOPER_TOOLS,
     get_model_tier_by_id,
-    get_display_name
+    get_display_name,
+    build_agent_toolkit_prompt
 )
 from shared_utils import (
     call_claude_api,
@@ -43,7 +44,7 @@ from shared_utils import (
     generate_video_with_sora
 )
 from gui import LiminalBackroomsApp, load_fonts
-from command_parser import parse_commands, AgentCommand, format_command_result, resolve_participant_target
+from command_parser import parse_commands, AgentCommand, format_command_result, resolve_participant_target, extract_mentions
 
 # Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
 if DEVELOPER_TOOLS:
@@ -90,6 +91,15 @@ class ImageUpdateSignals(QObject):
     """Signals for updating UI with generated images from background threads"""
     image_ready = pyqtSignal(dict, str)  # (image_message, image_path)
     image_failed = pyqtSignal(str, str, str)  # (ai_name, prompt, error_message)
+
+class WebToolSignals(QObject):
+    """Signals for !search / !fetch results produced on background threads"""
+    result_ready = pyqtSignal(str, str, dict, str)  # (ai_name, pending_key, chat_message, summary)
+    failed = pyqtSignal(str, str, str)  # (ai_name, pending_key, error_message)
+
+
+IN_PROGRESS_MARKERS = ("(generating...)", "(searching...)", "(fetching...)")
+
 
 class VideoUpdateSignals(QObject):
     """Signals for updating UI with generated videos from background threads"""
@@ -173,6 +183,22 @@ class Worker(QRunnable):
             # Still emit finished signal even if there's an error
             self.signals.finished.emit()
 
+def _get_control_panel(gui):
+    """Return the GUI control panel if reachable, else None (headless/bench runs)."""
+    try:
+        return gui.right_sidebar.control_panel
+    except AttributeError:
+        return None
+
+
+def _has_spoken(conversation, ai_name) -> bool:
+    """True if this agent slot already has a reply in the conversation."""
+    for msg in conversation:
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("ai_name") == ai_name:
+            return True
+    return False
+
+
 def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None, streaming_callback=None, invite_tier="Both", prompt_modifications=None, ai_temperatures=None):
     """Execute an AI turn with the given parameters
 
@@ -188,6 +214,23 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     
     # HTML contributions and living document disabled
     enhanced_system_prompt = system_prompt
+
+    # Operator-set system prompt for this agent (SYS button in the control panel)
+    control_panel = _get_control_panel(gui)
+    if control_panel is not None:
+        custom_prompt, replace_scenario = control_panel.get_agent_system_prompt(ai_name)
+        if custom_prompt:
+            if replace_scenario:
+                enhanced_system_prompt = custom_prompt
+            else:
+                enhanced_system_prompt = f"{enhanced_system_prompt}\n\n[Operator instructions for {ai_name}]\n{custom_prompt}"
+            print(f"[AI Turn] Applied operator system prompt for {ai_name} (replace={replace_scenario})")
+
+        # Group chat toolkit: make tools + @mentions available in every scenario
+        if control_panel.tools_enabled():
+            toolkit = build_agent_toolkit_prompt(enhanced_system_prompt)
+            if toolkit:
+                enhanced_system_prompt = f"{enhanced_system_prompt}\n\n{toolkit}"
     
     # The model parameter is now the actual model ID (from get_selected_model_id)
     model_id = model
@@ -234,6 +277,16 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     # Prepend model identity to system prompt so AI knows who it is
     display_name = get_display_name(model_id)
     enhanced_system_prompt = f"You are {ai_name} ({display_name}).\n\n{enhanced_system_prompt}"
+
+    # Shared briefing: each agent reads it once, before its first turn only
+    if control_panel is not None:
+        briefing = control_panel.get_briefing_prompt()
+        if briefing and not _has_spoken(conversation, ai_name):
+            enhanced_system_prompt = (
+                f"{enhanced_system_prompt}\n\n"
+                f"[BRIEFING — read this before your first message]\n{briefing}"
+            )
+            print(f"[AI Turn] Briefing injected for {ai_name} (first turn)")
     
     # Check for branch type and count AI responses
     is_rabbithole = False
@@ -603,6 +656,8 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
 
 class ConversationManager:
     """Manages conversation processing and state"""
+    MAX_SUMMONS_PER_ROUND = 2  # cap on @mention-triggered extra replies per round
+
     def __init__(self, app):
         self.app = app
         self.workers = []  # Keep track of worker threads
@@ -621,6 +676,10 @@ class ConversationManager:
         self.image_signals.image_failed.connect(self._on_image_failed)
 
         # Set up video update signals for thread-safe UI updates
+        self.web_tool_signals = WebToolSignals()
+        self.web_tool_signals.result_ready.connect(self._on_web_tool_ready)
+        self.web_tool_signals.failed.connect(self._on_web_tool_failed)
+
         self.video_signals = VideoUpdateSignals()
         self.video_signals.video_ready.connect(self._on_video_ready)
         self.video_signals.video_failed.connect(self._on_video_failed)
@@ -1084,6 +1143,7 @@ class ConversationManager:
                     "_command_success": success,
                     "_notification_id": notification_id
                 }
+                self._track_pending_notification(cmd, username, success, message, notification_id)
                 self.app.main_conversation.append(notification_msg)
 
         visible_conversation = [msg for msg in self.app.main_conversation if not msg.get('hidden', False)]
@@ -1116,6 +1176,12 @@ class ConversationManager:
     def _process_input_step_mode(self, user_input=None):
         """Step mode: run a single AI turn per propagate click."""
         has_user_content = self._add_user_message(user_input)
+
+        # Operator @AI-N in step mode: that agent answers next
+        if user_input and self.app.right_sidebar.control_panel.tools_enabled():
+            mentioned = extract_mentions(user_input if isinstance(user_input, str) else str(user_input))
+            if mentioned:
+                self.app.right_sidebar.control_panel.next_turn_selector.setCurrentText(mentioned[0])
 
         num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
         selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
@@ -1261,6 +1327,10 @@ class ConversationManager:
         """Normal mode: run all AIs sequentially in one propagate click."""
         self._add_user_message(user_input)
 
+        # New round: allow fresh @mention summons
+        self._summon_phase = False
+        self._summoned_this_round = set()
+
         # Get number of AIs from UI
         num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
 
@@ -1390,6 +1460,7 @@ class ConversationManager:
         if hasattr(self, '_pending_ais') and self._pending_ais:
             pending = self._pending_ais.copy()
             self._pending_ais = []  # Clear the queue
+            self._summon_phase = True  # Replies from here on can't trigger new summons
             
             print(f"[Agent] Processing {len(pending)} pending AI(s) added during this round")
             for idx, p in enumerate(pending):
@@ -1941,12 +2012,7 @@ class ConversationManager:
                 }
                 
                 # For in-progress notifications (success=None), store ID for later removal
-                if success is None and "(generating...)" in message:
-                    if not hasattr(self, '_pending_notifications'):
-                        self._pending_notifications = {}
-                    prompt_key = cmd.params.get('prompt', '')[:50] if cmd.params else ''
-                    self._pending_notifications[f"{ai_name}:{prompt_key}"] = notification_id
-                    print(f"[Agent] Stored pending notification ID: {notification_id} for {ai_name}:{prompt_key[:30]}...")
+                self._track_pending_notification(cmd, ai_name, success, message, notification_id)
                 
                 # Add to the correct conversation (no render yet - batch it)
                 if self.app.active_branch:
@@ -1964,6 +2030,9 @@ class ConversationManager:
                 if hasattr(self.app, 'notification_label'):
                     self.app.notification_label.setText(message)
         
+        # @AI-N mentions summon that agent for a reply (group-chat bot behaviour)
+        self._handle_mentions(cleaned_content, ai_name)
+
         # Use cleaned content (commands stripped out) for the conversation
         response_content = cleaned_content
         
@@ -2196,6 +2265,8 @@ class ConversationManager:
             return self._execute_mute_command(ai_name)
         elif action == 'search':
             return self._execute_search_command(params.get('query', ''), ai_name)
+        elif action == 'fetch':
+            return self._execute_fetch_command(params.get('url', ''), ai_name)
         elif action == 'prompt':
             return self._execute_prompt_command(params.get('text', ''), ai_name)
         elif action == 'temperature':
@@ -2534,8 +2605,24 @@ class ConversationManager:
         self.app.muted_ais.add(ai_name)
         return True, f"🔇 [{caller}]: !mute_self"
 
+    @staticmethod
+    def _pending_key(params: dict) -> str:
+        """Key that ties an in-progress notification to its background result."""
+        params = params or {}
+        return (params.get('prompt') or params.get('query') or params.get('url') or '')[:50]
+
+    def _track_pending_notification(self, cmd, ai_name, success, message, notification_id):
+        """Remember in-progress notifications so they can be removed when the job finishes."""
+        if success is not None or not any(m in message for m in IN_PROGRESS_MARKERS):
+            return
+        if not hasattr(self, '_pending_notifications'):
+            self._pending_notifications = {}
+        key = self._pending_key(cmd.params)
+        self._pending_notifications[f"{ai_name}:{key}"] = notification_id
+        print(f"[Agent] Stored pending notification ID: {notification_id} for {ai_name}:{key[:30]}...")
+
     def _execute_search_command(self, query: str, ai_name: str) -> tuple[bool, str]:
-        """Execute a web search command and inject results into conversation."""
+        """Run a web search on a background thread; results are posted when ready."""
         from shared_utils import web_search
         caller = self._format_caller(ai_name)
 
@@ -2543,39 +2630,157 @@ class ConversationManager:
             return False, f"❌ [{caller}]: !search — query too short"
 
         print(f"[Agent] Searching for {caller}: {query}")
+        pending_key = self._pending_key({'query': query})
 
-        # Perform the search
-        search_result = web_search(query, max_results=5)
+        def _run_search_job():
+            try:
+                search_result = web_search(query, max_results=5)
+                if not search_result.get('success'):
+                    error_msg = search_result.get('error', 'Unknown error')
+                    self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — {error_msg}")
+                    return
+                results = search_result.get('results', [])
+                if not results:
+                    self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — no results found")
+                    return
 
-        if not search_result.get('success'):
-            error_msg = search_result.get('error', 'Unknown error')
-            return False, f"❌ [{caller}]: !search \"{query}\" — {error_msg}"
+                formatted = f"🔍 [{caller}]: !search \"{query}\"\n\n**Search Results:**\n"
+                for i, r in enumerate(results, 1):
+                    formatted += f"\n{i}. **{r.get('title', 'No title')}**\n"
+                    formatted += f"   {r.get('snippet', 'No snippet')}\n"
+                    formatted += f"   Source: {r.get('url', 'No URL')}\n"
 
-        # Format results for display
-        results = search_result.get('results', [])
-        if not results:
-            return False, f"❌ [{caller}]: !search \"{query}\" — no results found"
+                search_message = {
+                    "role": "user",
+                    "content": formatted,
+                    "_type": "search_result",
+                    "hidden": False
+                }
+                summary = f"🔍 [{caller}]: !search \"{query}\" (found {len(results)} results)"
+                self.web_tool_signals.result_ready.emit(ai_name, pending_key, search_message, summary)
+            except Exception as e:
+                print(f"[Agent] Search job failed: {e}")
+                self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — {e}")
 
-        # Format results for conversation context (with markdown formatting)
-        formatted = f"🔍 [{caller}]: !search \"{query}\"\n\n**Search Results:**\n"
-        for i, r in enumerate(results, 1):
-            formatted += f"\n{i}. **{r.get('title', 'No title')}**\n"
-            formatted += f"   {r.get('snippet', 'No snippet')}\n"
-            formatted += f"   Source: {r.get('url', 'No URL')}\n"
+        threading.Thread(target=_run_search_job, daemon=True).start()
+        return None, f"🔍 [{caller}]: !search \"{query}\" (searching...)"
 
-        # Add search results to conversation so all AIs can see them
-        search_message = {
-            "role": "user",
-            "content": formatted,
-            "_type": "search_result",
-            "hidden": False
+    def _execute_fetch_command(self, url: str, ai_name: str) -> tuple[bool, str]:
+        """Fetch a public web page on a background thread; an excerpt is posted when ready."""
+        from shared_utils import fetch_url_text
+        caller = self._format_caller(ai_name)
+
+        if not url or len(url.strip()) < 4:
+            return False, f"❌ [{caller}]: !fetch — no URL given"
+
+        print(f"[Agent] Fetching for {caller}: {url}")
+        pending_key = self._pending_key({'url': url})
+
+        def _run_fetch_job():
+            try:
+                result = fetch_url_text(url)
+                if not result.get('success'):
+                    self.web_tool_signals.failed.emit(
+                        ai_name, pending_key, f"!fetch \"{url}\" — {result.get('error', 'failed')}")
+                    return
+                title = result.get('title') or result.get('url')
+                fetch_message = {
+                    "role": "user",
+                    "content": (
+                        f"🌐 [{caller}]: !fetch \"{result.get('url')}\"\n\n"
+                        f"**{title}**\n\n{result.get('text')}"
+                    ),
+                    "_type": "search_result",
+                    "hidden": False
+                }
+                summary = f"🌐 [{caller}]: !fetch \"{title[:60]}\""
+                self.web_tool_signals.result_ready.emit(ai_name, pending_key, fetch_message, summary)
+            except Exception as e:
+                print(f"[Agent] Fetch job failed: {e}")
+                self.web_tool_signals.failed.emit(ai_name, pending_key, f"!fetch \"{url}\" — {e}")
+
+        threading.Thread(target=_run_fetch_job, daemon=True).start()
+        return None, f"🌐 [{caller}]: !fetch \"{url[:60]}\" (fetching...)"
+
+    def _active_conversation(self):
+        if self.app.active_branch and self.app.active_branch in self.app.branch_conversations:
+            return self.app.branch_conversations[self.app.active_branch]['conversation']
+        return self.app.main_conversation
+
+    def _on_web_tool_ready(self, ai_name: str, pending_key: str, chat_message: dict, summary: str):
+        """Main thread: post a finished !search / !fetch result so every agent can read it."""
+        self._remove_pending_notification(ai_name, pending_key)
+        conversation = self._active_conversation()
+        conversation.append(chat_message)
+        self._post_notification(summary, True)
+        self.app.left_pane.conversation = conversation
+        self.app.left_pane.render_conversation()
+
+    def _on_web_tool_failed(self, ai_name: str, pending_key: str, error_message: str):
+        """Main thread: replace the in-progress notice with the failure."""
+        self._remove_pending_notification(ai_name, pending_key)
+        caller = self._format_caller(ai_name)
+        self._post_notification(f"❌ [{caller}]: {error_message}", False)
+        conversation = self._active_conversation()
+        self.app.left_pane.conversation = conversation
+        self.app.left_pane.render_conversation()
+
+    def _handle_mentions(self, text: str, speaker: str):
+        """Grok-bot style summons: @AI-N in a reply queues that agent for an extra reply."""
+        control_panel = self.app.right_sidebar.control_panel
+        if not control_panel.tools_enabled():
+            return
+        num_ais = int(control_panel.num_ais_selector.currentText())
+        targets = [t for t in extract_mentions(text)
+                   if t != speaker and int(t.split('-')[1]) <= num_ais]
+        if not targets:
+            return
+
+        caller = self._format_caller(speaker)
+
+        # Step mode: the first mentioned agent simply speaks next
+        if control_panel.is_step_mode():
+            control_panel.next_turn_selector.setCurrentText(targets[0])
+            self._post_notification(f"📣 [{caller}] pinged {targets[0]} — up next", None)
+            return
+
+        # Normal mode: summons run after the round; replies to summons can't summon again
+        if getattr(self, '_summon_phase', False):
+            return
+        if not hasattr(self, '_pending_ais'):
+            self._pending_ais = []
+        summoned = getattr(self, '_summoned_this_round', set())
+        for target in targets:
+            if len(summoned) >= self.MAX_SUMMONS_PER_ROUND:
+                break
+            if target in summoned or any(p['ai_name'] == target for p in self._pending_ais):
+                continue
+            ai_number = int(target.split('-')[1])
+            self._pending_ais.append({
+                'ai_name': target,
+                'model': self.get_model_for_ai(ai_number),
+                'persona': None,
+                'invited_by': speaker,
+                'summon': True,
+            })
+            summoned.add(target)
+            self._post_notification(f"📣 [{caller}] pinged {target} — they'll reply at the end of this round", None)
+        self._summoned_this_round = summoned
+
+    def _post_notification(self, message: str, success):
+        """Append an agent notification to the active conversation."""
+        notification = {
+            "role": "system",
+            "content": message,
+            "_type": "agent_notification",
+            "_command_success": success,
         }
-        self.app.main_conversation.append(search_message)
-
-        # Trigger UI update by redisplaying conversation
-        self.app.left_pane.display_conversation(self.app.main_conversation)
-
-        return True, f"🔍 [{caller}]: !search \"{query}\" (found {len(results)} results)"
+        if self.app.active_branch and self.app.active_branch in self.app.branch_conversations:
+            self.app.branch_conversations[self.app.active_branch]['conversation'].append(notification)
+        else:
+            self.app.main_conversation.append(notification)
+        if hasattr(self.app, 'notification_label'):
+            self.app.notification_label.setText(message)
 
     def _execute_prompt_command(self, text: str, ai_name: str) -> tuple[bool, str]:
         """Execute a prompt addition command - appends to system prompt.
