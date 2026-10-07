@@ -1,0 +1,8 @@
+[
+  {"id": "hook", "text": "Anthropic found a hidden space inside Claude. A place where thoughts wait, before they're spoken."},
+  {"id": "lens", "text": "They built a probe called the Jacobian lens. Point it at any layer, and it shows the words the model is getting ready to say. Now, or later."},
+  {"id": "spider", "text": "Ask: how many legs does the animal that spins webs have? The answer never says spider. But inside, spider lights up. Swap it for ant, and eight flips to six."},
+  {"id": "tiny", "text": "This space is tiny. About twenty-five concepts at once. Under ten percent of the signal. Knock it out, and the model still talks. But it can't reason."},
+  {"id": "safety", "text": "And it shows what models don't say. In a staged blackmail test: leverage. Survival. Fake. It suspected a test. A model trained to cheat? Secretly. Fraud. While its code looked clean."},
+  {"id": "close", "text": "It's not proof of consciousness. But for the first time, we can read what a model is thinking, before it decides what to say. This is J-space."}
+]
