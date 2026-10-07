@@ -4,12 +4,18 @@ A Python-based application that enables dynamic conversations between multiple A
 
 ## What's New
 
-- **Phosphor Green CRT UI**: Full visual overhaul — black backgrounds, phosphor green accents, monospace Iosevka Term throughout, CRT scanline overlay, animated backgrounds. Inspired by retro terminal aesthetics.
+- **Cypher OS UI**: The app is restyled as a hacker-OS shell: ink-black background, acid-lime accent, thin grey borders, square window frames, faint scanlines. Each agent gets its own color (lime, ice, violet, rose, white) and the human operator is amber. Panes are renamed CTRL.PANEL, NET.GRAPH, SYS.MONITOR and MEDIA.VIEW. See [Fonts](#fonts) for the typefaces.
+- **Per-Agent System Prompts**: A **SYS** button on each AI slot sets that agent's own system prompt, either added on top of the scenario prompt or replacing it
+- **Briefing**: A shared prompt every agent reads once, before its first turn only
+- **Group-Chat Tools in Every Scenario**: With **Agent tools + @mentions** on, every agent is told about the commands its scenario doesn't already list
+- **`@AI-N` Mentions**: Agents can call on each other by slot. The mentioned agent gets an extra reply at the end of the round, or speaks next in step mode.
+- **`!fetch "url"`**: Agents can read a public web page and share a text excerpt with the group
+- **Non-Blocking Web Tools**: `!search` and `!fetch` run in the background, so the UI never freezes while they work. Search now uses the maintained `ddgs` package.
 - **Conversation Search**: `Ctrl+F` opens a search overlay with match navigation and highlighting
 - **Zoom**: `Ctrl+=` / `Ctrl+-` to zoom the chat pane (50%-200%), `Ctrl+0` to reset
 - **Speed Controls**: 0.5x / 1x / 2x / 5x turn speed buttons in the status bar
 - **Live Stats Panel**: New STATS tab showing turns, active AIs, estimated tokens, word count, avg response time, images generated, and commands executed
-- **Retro Control Panel**: ASCII box-drawing section headers, segmented slider gauges for iterations and number of AIs
+- **Control Panel**: `// SECTION` headers over thin dividers, and segmented slider gauges for iterations and number of AIs
 - **Keyboard Shortcuts**: `Ctrl+Enter` (propagate), `Ctrl+E` (export), `Ctrl+Shift+N` (reset), `Escape` (stop), `F11` (fullscreen), `Ctrl+T` (toggle CRT)
 - **Auto-Save Recovery**: Conversations auto-save every 30 seconds; on startup offers to recover the previous session
 - **New AI Commands**:
@@ -21,7 +27,7 @@ A Python-based application that enables dynamic conversations between multiple A
 - **AI-Generated Images**: `!image` uses Grok Imagine (`grok-imagine-image-2.0`) and OpenAI GPT Image (`gpt-image-2`, Codex path), with OpenRouter Gemini as fallback
 - **AI-Generated Videos**: Sora 2 video generation via `!video` command (currently disabled in scenarios — expensive!)
 - **AI Self-Modification**: Models can modify their own system prompts (`!prompt`) and adjust their temperature (`!temperature`)
-- **Web Search**: Models can search the internet for up-to-date information (`!search`)
+- **Web Search & Reading**: Models can search the internet (`!search`) and read pages (`!fetch`) for up-to-date information
 - **BackroomsBench Evaluation (Beta)**: Multi-judge LLM evaluation system for measuring philosophical depth and linguistic creativity
 
 ## How It Works
@@ -47,7 +53,9 @@ While great for AI shitposting, this is easy to customize for interesting experi
   - `!add_ai "Model Name" "persona"` — invite another AI to the conversation (max 5)
   - `!image "description"` — generate an image (Grok Imagine, or GPT Image when the speaker is Codex/OpenAI)
   - `!video "description"` — generate a video (Sora 2) [currently disabled in scenarios]
-  - `!search "query"` — search the web for up-to-date information
+  - `!search "query"` — search the web for up-to-date information (runs in the background)
+  - `!fetch "https://…"` — read a public web page and post a text excerpt to the chat (runs in the background; local and private-network addresses are blocked)
+  - `@AI-N` — mention another agent by slot (e.g. `@AI-3`) to call on them. In normal mode they get an extra reply at the end of the round (max 2 per round, and those replies can't call on anyone else). In step mode they speak next. This also works when you type the mention yourself in step mode.
   - `!prompt "text"` — modify your own system prompt (persists across turns)
   - `!temperature X` — adjust your own sampling temperature (0-2, default 1.0)
   - `!mute_self` — sit out a turn and just listen
@@ -55,9 +63,10 @@ While great for AI shitposting, this is easy to customize for interesting experi
   - `!whisper "AI-X" "message"` — private message to a slot, model id, or name (`"grok 4.20"`). Visible to you, not to the other AIs.
 
 - UI & Controls:
-  - Phosphor green CRT terminal aesthetic with scanline overlay
-  - Retro segmented sliders for iterations and number of AIs
-  - ASCII box-drawing section headers in control panel
+  - Cypher OS look with faint scanline overlay
+  - Segmented sliders for iterations and number of AIs
+  - Per-agent **SYS** prompt editor and a shared **BRIEFING** box
+  - **Agent tools + @mentions** toggle (on by default)
   - Conversation search with `Ctrl+F`
   - Zoom with `Ctrl+=` / `Ctrl+-`
   - Speed controls (0.5x—5x) in status bar
@@ -153,6 +162,9 @@ poetry run python main.py
    - Iterations: Set number of conversation turns using the retro slider (click or scroll)
    - AI Model Selection: Choose models for each AI slot
    - Prompt Style: Select from predefined scenarios
+   - SYS (on each AI row): Set that agent's own system prompt. Leave **Replace the scenario prompt** unchecked to add it on top of the scenario; check it to use only your prompt. The button reads `SYS ●` when a prompt is set.
+   - Briefing: Shared text each agent receives once, before its first turn only. Use it for ground rules, the topic, or context everyone should start with.
+   - Agent tools + @mentions (under Options): Gives every agent the group-chat tool list and turns on `@AI-N` mentions. Turn it off for a plain conversation.
    - Input Field: Enter your message or initial prompt
    - Export: Save conversation and generated images
    - View HTML: Open styled conversation in browser
@@ -167,6 +179,19 @@ Application settings in `config.py`:
 - Runtime settings (turn delay, etc.)
 - Available AI models in `AI_MODELS` dictionary
 - Scenario prompts in `SYSTEM_PROMPT_PAIRS` dictionary
+
+### Saved Prompts
+
+Per-agent SYS prompts, the briefing text and the tools toggle are saved automatically with Qt's `QSettings` (under `LiminalBackrooms/CypherOS`) and restored on the next launch.
+
+### Fonts
+
+The UI prefers **JetBrains Mono** for text and **Chakra Petch** for headings. These fonts aren't bundled. To use them, drop the TTF files into `fonts/` with these names:
+
+- `JetBrainsMono-Regular.ttf`, `JetBrainsMono-Bold.ttf`
+- `ChakraPetch-SemiBold.ttf`, `ChakraPetch-Bold.ttf`
+
+Without them the app falls back to the bundled Iosevka Term.
 
 ### Developer Tools
 
@@ -224,12 +249,17 @@ SORA_SIZE=1280x720     # resolution
    - Use a live OmniRoute model ID, not an OpenRouter ID
    - Image generation still uses `OPENROUTER_API_KEY` when configured
 
-2. GUI Issues:
+2. Web Tool Issues:
+
+   - `!search` uses the `ddgs` package. If search returns nothing, check that `ddgs` is installed (`poetry install`). The macOS `.app` launcher uses `.runtime-venv`, so install it there too: `uv pip install --python .runtime-venv/bin/python ddgs`
+   - `!fetch` only reads public `http(s)` pages. It refuses localhost and private-network addresses (also after redirects), and non-text content.
+
+3. GUI Issues:
 
    - Ensure PyQt6 is installed (handled by Poetry install)
    - Check Python version compatibility
 
-3. Empty Responses:
+4. Empty Responses:
    - Some models occasionally return empty — the app will retry once automatically
    - Check OmniRoute logs / dashboard if persistent
 
