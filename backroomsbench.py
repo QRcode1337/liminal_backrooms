@@ -9,20 +9,20 @@ import os
 import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from shared_utils import call_openrouter_api
+from shared_utils import call_omniroute_api
 
-# Judge models - all via OpenRouter
+# Judge models - all via OmniRoute with exact live IDs
 JUDGES = {
-    "Claude Opus 4.5": {
-        "api": "openrouter",
-        "model_id": "anthropic/claude-opus-4"
+    "Claude Opus 4.6": {
+        "api": "omniroute",
+        "model_id": "anthropic/claude-opus-4-6"
     },
-    "Gemini 3 Pro": {
-        "api": "openrouter", 
-        "model_id": "google/gemini-3-pro-preview"
+    "Gemini 3.1 Pro": {
+        "api": "omniroute",
+        "model_id": "gemini/gemini-3.1-pro-preview"
     },
     "GPT 5.1": {
-        "api": "openrouter",
+        "api": "omniroute",
         "model_id": "openai/gpt-5.1"
     }
 }
@@ -258,10 +258,10 @@ def create_consensus_summary(report_texts: dict, session_dir: str) -> dict:
     prompt = f"Please analyze these {len(report_texts)} evaluation reports and create a consensus summary:\n{combined_reports}"
     
     try:
-        response = call_openrouter_api(
+        response = call_omniroute_api(
             prompt=prompt,
             conversation_history=[],
-            model="anthropic/claude-opus-4",
+            model="anthropic/claude-opus-4-6",
             system_prompt=CONSENSUS_SYSTEM_PROMPT,
             temperature=0.3
         )
@@ -512,7 +512,7 @@ def run_single_judge(judge_name, judge_config, conversation_text):
         # Prepend judge identity to system prompt so they know who they are
         judge_system_prompt = f"You are {judge_name}. When signing your report, use this name.\n\n{JUDGE_SYSTEM_PROMPT}"
         
-        response = call_openrouter_api(
+        response = call_omniroute_api(
             prompt=prompt,
             conversation_history=messages,
             model=judge_config["model_id"],
@@ -671,4 +671,3 @@ if __name__ == "__main__":
     )
     
     print(f"Test complete. Check {result['output_dir']} for reports.")
-

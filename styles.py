@@ -10,62 +10,72 @@ Usage:
 """
 
 # =============================================================================
-# COLOR PALETTE - Phosphor Green CRT Terminal Theme
+# COLOR PALETTE - Cypher OS (ink-black shell, acid signal, hairline chrome)
 # =============================================================================
 
 COLORS = {
-    # Backgrounds - true black to very dark green-black
-    'bg_dark': '#000000',           # Pure black (CRT off-pixel)
-    'bg_medium': '#0A1A0A',         # Very dark green-black (message blocks)
-    'bg_light': '#142814',          # Slightly lighter green-black (hover/selection)
+    # Backgrounds - ink black, panel, titlebar
+    'bg_dark': '#06080B',           # Ground / desktop
+    'bg_medium': '#0C1015',         # Window panels, message blocks
+    'bg_light': '#121821',          # Hover / selection
+    'bg_titlebar': '#10151C',       # Window title strips, section headers
 
-    # Primary accents - phosphor green spectrum
-    'accent_cyan': '#00FF41',       # Bright phosphor green (primary accent)
-    'accent_cyan_hover': '#00CC33', # Medium phosphor green (hover)
-    'accent_cyan_active': '#009926',# Darker phosphor green (pressed)
+    # Primary accent - acid signal (key name kept for compatibility)
+    'accent_cyan': '#C6FF3D',       # Signal (primary accent)
+    'accent_cyan_hover': '#A8E01F', # Signal hover
+    'accent_cyan_active': '#8BBF0F',# Signal pressed
 
     # Secondary accents - functional differentiation
-    'accent_pink': '#FF3333',       # Red (danger, errors, human-related)
-    'accent_purple': '#00AA22',     # Deep green (tertiary, export buttons)
-    'accent_yellow': '#CCFF00',     # Yellow-green (warnings)
-    'accent_green': '#00FF41',      # Same as primary (rabbithole)
+    'accent_pink': '#FF5C7A',       # Alert (danger, errors)
+    'accent_purple': '#5CE1E6',     # Ice (tertiary, export buttons)
+    'accent_yellow': '#FFB547',     # Amber (warnings)
+    'accent_green': '#C6FF3D',      # Same as primary (rabbithole)
+    'accent_violet': '#B69CFF',     # System events
 
-    # AI-specific colors (for chat message headers/borders - green spectrum)
-    'ai_1': '#00FF41',              # Bright phosphor green - AI-1
-    'ai_2': '#33FF66',              # Lighter green - AI-2
-    'ai_3': '#66FFAA',              # Mint green - AI-3
-    'ai_4': '#99FFCC',              # Pale green - AI-4
-    'ai_5': '#CCFFEE',              # Near-white green - AI-5
-    'human': '#FF6600',             # Amber/orange - Human User (stands out from green)
+    # AI-specific colors (agent rails/tags) - distinct hue AND lightness
+    'ai_1': '#C6FF3D',              # Signal
+    'ai_2': '#5CE1E6',              # Ice
+    'ai_3': '#B69CFF',              # Violet
+    'ai_4': '#FF8FCB',              # Rose
+    'ai_5': '#EDF2F6',              # White
+    'human': '#FFB547',             # Operator amber
 
     # Notification colors
-    'notify_error': '#FF3333',      # Red - Error/Failure
-    'notify_success': '#00FF41',    # Phosphor green - Success
-    'notify_info': '#CCFF00',       # Yellow-green - Informational
+    'notify_error': '#FF5C7A',      # Alert
+    'notify_success': '#C6FF3D',    # Signal
+    'notify_info': '#5CE1E6',       # Ice
 
-    # Text colors - WHITE for message body, green for UI chrome
-    'text_normal': '#E0E0E0',       # White/light gray - message body text (readability)
-    'text_dim': '#1A6B1A',          # Dim green - timestamps, secondary labels
-    'text_bright': '#F0F0F0',       # Near-white - emphasis text
-    'text_glow': '#00FF41',         # Phosphor green - headers, glowing elements
-    'text_timestamp': '#1A6B1A',    # Dim green - same as text_dim
-    'text_error': '#FF3333',        # Red - Error text
+    # Notification / code tints (dark backgrounds behind colored text)
+    'tint_error': '#1E0E13',
+    'tint_success': '#131A08',
+    'tint_info': '#0B181B',
+    'tint_warn': '#1E170A',
+    'code_bg': '#0A0D12',
+    'code_header': '#10151C',
 
-    # Borders and effects
-    'border': '#0D3B0D',            # Very dark green
-    'border_glow': '#00FF41',       # Bright phosphor green borders
-    'border_highlight': '#1A6B1A',  # Medium green borders
-    'shadow': 'rgba(0, 255, 65, 0.2)',  # Green glow shadows
+    # Text colors
+    'text_normal': '#D7E0E8',       # Message body
+    'text_dim': '#7D8A99',          # Meta, labels, timestamps (4.5:1 on panels)
+    'text_bright': '#F2F5F8',       # Emphasis
+    'text_glow': '#C6FF3D',         # Headers, live elements
+    'text_timestamp': '#7D8A99',
+    'text_error': '#FF5C7A',
+
+    # Borders and effects - hairlines, accent only on focus
+    'border': '#1F2A36',            # Hairline
+    'border_glow': '#2A3746',       # Control outline
+    'border_highlight': '#3A4A5C',  # Hover outline
+    'shadow': 'rgba(198, 255, 61, 0.18)',
 
     # Legacy color mappings for compatibility
-    'accent_blue': '#00FF41',       # Map old blue to phosphor green
-    'accent_blue_hover': '#00CC33',
-    'accent_blue_active': '#009926',
-    'accent_orange': '#CCFF00',     # Yellow-green
-    'chain_of_thought': '#00AA22',  # Deep green
-    'user_header': '#00FF41',       # Phosphor green
-    'ai_header': '#33FF66',         # Lighter green
-    'system_message': '#CCFF00',    # Yellow-green
+    'accent_blue': '#C6FF3D',
+    'accent_blue_hover': '#A8E01F',
+    'accent_blue_active': '#8BBF0F',
+    'accent_orange': '#FFB547',
+    'chain_of_thought': '#8E9BAA',
+    'user_header': '#FFB547',
+    'ai_header': '#5CE1E6',
+    'system_message': '#B69CFF',
 }
 
 
@@ -74,10 +84,11 @@ COLORS = {
 # =============================================================================
 
 FONTS = {
-    # All monospace - full terminal feel
-    'family_mono': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
-    'family_display': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
-    'family_ui': "'Iosevka Term', 'Consolas', 'Courier New', monospace",
+    # Mono body + angular display. Drop JetBrainsMono / ChakraPetch TTFs into
+    # fonts/ to bundle them; otherwise the stack falls back to Iosevka Term.
+    'family_mono': "'JetBrains Mono', 'Iosevka Term', 'SF Mono', 'Menlo', 'Consolas', monospace",
+    'family_display': "'Chakra Petch', 'JetBrains Mono', 'Iosevka Term', 'Menlo', monospace",
+    'family_ui': "'JetBrains Mono', 'Iosevka Term', 'SF Mono', 'Menlo', 'Consolas', monospace",
     
     # Font sizes
     'size_xs': '8px',
@@ -97,7 +108,7 @@ FONTS = {
 # =============================================================================
 
 def get_combobox_style():
-    """Get the style for comboboxes - phosphor green CRT themed."""
+    """Get the style for comboboxes - Cypher OS themed."""
     return f"""
         QComboBox {{
             background-color: {COLORS['bg_medium']};
@@ -163,8 +174,10 @@ def get_button_style(accent_color=None):
             border: 1px solid {accent};
             border-radius: 0px;
             padding: 10px 14px;
+            font-family: {FONTS['family_display']};
             font-size: {FONTS['size_sm']};
             font-weight: bold;
+            letter-spacing: 1px;
         }}
         QPushButton:hover {{
             background-color: {accent};
@@ -182,7 +195,7 @@ def get_button_style(accent_color=None):
 
 
 def get_input_style():
-    """Get style for text inputs - phosphor green CRT themed."""
+    """Get style for text inputs - Cypher OS themed."""
     return f"""
         QLineEdit, QTextEdit {{
             background-color: {COLORS['bg_medium']};
@@ -238,7 +251,7 @@ def get_label_style(style_type='normal'):
 
 
 def get_checkbox_style():
-    """Get style for checkboxes - phosphor green CRT themed."""
+    """Get style for checkboxes - Cypher OS themed."""
     return f"""
         QCheckBox {{
             color: {COLORS['text_dim']};
@@ -265,11 +278,11 @@ def get_checkbox_style():
 
 def get_scrollbar_style():
     """
-    Get style for scrollbars - retro CRT/phosphor green CRT theme.
+    Get style for scrollbars - Cypher OS theme.
     
     Features:
     - No rounded corners (sharp edges for retro look)
-    - Cyan glow on hover
+    - Signal accent on hover
     - Minimal design
     """
     return f"""
@@ -354,6 +367,22 @@ def get_frame_style(style_type='default'):
         """,
     }
     return styles.get(style_type, styles['default'])
+
+
+def get_window_title_style(accent_color=None):
+    """Title strip for a Cypher OS window/pane (hairline under a titlebar fill)."""
+    accent = accent_color or COLORS['text_bright']
+    return f"""
+        color: {accent};
+        font-family: {FONTS['family_display']};
+        font-size: 12px;
+        font-weight: bold;
+        letter-spacing: 2px;
+        padding: 9px 12px;
+        background-color: {COLORS['bg_titlebar']};
+        border: none;
+        border-bottom: 1px solid {COLORS['border']};
+    """
 
 
 def get_tooltip_style():

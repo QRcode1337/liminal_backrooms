@@ -29,22 +29,22 @@ from config import (
     SHARE_CHAIN_OF_THOUGHT,
     DEVELOPER_TOOLS,
     get_model_tier_by_id,
-    get_display_name
+    get_display_name,
+    build_agent_toolkit_prompt
 )
 from shared_utils import (
     call_claude_api,
-    call_openrouter_api,
+    call_omniroute_api,
     call_openai_api,
     call_replicate_api,
     call_deepseek_api,
     call_direct_provider_api,
     open_html_in_browser,
     generate_image_from_text,
-    generate_video_with_sora,
-    get_visible_messages,
+    generate_video_with_sora
 )
 from gui import LiminalBackroomsApp, load_fonts
-from command_parser import parse_commands, AgentCommand, format_command_result
+from command_parser import parse_commands, AgentCommand, format_command_result, resolve_participant_target, extract_mentions
 
 # Import freeze detector for debugging (only used when DEVELOPER_TOOLS is enabled)
 if DEVELOPER_TOOLS:
@@ -91,6 +91,15 @@ class ImageUpdateSignals(QObject):
     """Signals for updating UI with generated images from background threads"""
     image_ready = pyqtSignal(dict, str)  # (image_message, image_path)
     image_failed = pyqtSignal(str, str, str)  # (ai_name, prompt, error_message)
+
+class WebToolSignals(QObject):
+    """Signals for !search / !fetch results produced on background threads"""
+    result_ready = pyqtSignal(str, str, dict, str)  # (ai_name, pending_key, chat_message, summary)
+    failed = pyqtSignal(str, str, str)  # (ai_name, pending_key, error_message)
+
+
+IN_PROGRESS_MARKERS = ("(generating...)", "(searching...)", "(fetching...)")
+
 
 class VideoUpdateSignals(QObject):
     """Signals for updating UI with generated videos from background threads"""
@@ -174,124 +183,20 @@ class Worker(QRunnable):
             # Still emit finished signal even if there's an error
             self.signals.finished.emit()
 
-def _prepare_system_prompt(ai_name, system_prompt, model_id, invite_tier, prompt_modifications):
-    """Build the final system prompt with model identity, invite models list, and prompt additions."""
-    from config import get_invite_models_text
-
-    enhanced = system_prompt
-    models_text = get_invite_models_text(invite_tier)
-
-    # Inject available models list near the !add_ai command
-    if "!add_ai" in enhanced:
-        placeholder_pattern = r'\[Models list injected based on tier setting\]'
-        emphatic_pattern = r'⚠️ ONLY USE (?:FREE|PAID) MODELS:[^\n]*'
-        legacy_pattern = r'(?:FREE MODELS[^:]*:|PAID MODELS[^:]*:|Available[^:]*:)[^\n]*'
-
-        if re.search(placeholder_pattern, enhanced):
-            enhanced = re.sub(placeholder_pattern, models_text, enhanced)
-        elif re.search(emphatic_pattern, enhanced):
-            enhanced = re.sub(emphatic_pattern, models_text, enhanced)
-        elif re.search(legacy_pattern, enhanced):
-            enhanced = re.sub(legacy_pattern, models_text, enhanced)
-        else:
-            enhanced = enhanced.replace(
-                '!add_ai "Model Name"',
-                f'!add_ai "Model Name"\n  {models_text}\n '
-            )
-
-    # Prepend model identity
-    display_name = get_display_name(model_id)
-    enhanced = f"You are {ai_name} ({display_name}).\n\n{enhanced}"
-
-    # Apply !prompt additions
-    if prompt_modifications and ai_name in prompt_modifications:
-        mods = prompt_modifications[ai_name]
-        if isinstance(mods, list) and mods:
-            enhanced += "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(mods)
-            print(f"[AI Turn] Applied {len(mods)} prompt additions for {ai_name}")
-        elif isinstance(mods, str):
-            print(f"[AI Turn] Using custom prompt for {ai_name}: {mods[:100]}...")
-            enhanced = mods
-
-    return enhanced
+def _get_control_panel(gui):
+    """Return the GUI control panel if reachable, else None (headless/bench runs)."""
+    try:
+        return gui.right_sidebar.control_panel
+    except AttributeError:
+        return None
 
 
-def _detect_branch_context(conversation):
-    """Detect branch type (rabbithole/fork) and count post-branch AI responses.
-
-    Returns:
-        (is_rabbithole, is_fork, branch_text, ai_response_count)
-    """
-    is_rabbithole = False
-    is_fork = False
-    branch_text = ""
-    latest_branch_idx = -1
-
-    for i, msg in enumerate(conversation):
-        if isinstance(msg, dict) and msg.get("_type") == "branch_indicator":
-            latest_branch_idx = i
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                parts = content.split('"')
-                if "Rabbitholing down:" in content:
-                    is_rabbithole, is_fork = True, False
-                    branch_text = parts[1] if len(parts) > 1 else ""
-                elif "Forking off:" in content:
-                    is_fork, is_rabbithole = True, False
-                    branch_text = parts[1] if len(parts) > 1 else ""
-
-    ai_response_count = 0
-    if latest_branch_idx >= 0:
-        for i, msg in enumerate(conversation):
-            if i > latest_branch_idx and msg.get("role") == "assistant":
-                ai_response_count += 1
-
-    return is_rabbithole, is_fork, branch_text, ai_response_count
-
-
-def _filter_conversation_messages(conversation, ai_name):
-    """Filter conversation: remove system msgs, duplicates, whispers for other AIs.
-
-    Returns:
-        List of filtered message dicts.
-    """
-    filtered = []
-    seen_contents = set()
-
+def _has_spoken(conversation, ai_name) -> bool:
+    """True if this agent slot already has a reply in the conversation."""
     for msg in conversation:
-        if not isinstance(msg, dict):
-            msg = {"role": "user", "content": str(msg)}
-
-        content = msg.get("content", "")
-
-        # Skip hidden connecting messages
-        if msg.get("hidden") and isinstance(content, str) and "connect" in content.lower():
-            continue
-        # Skip empty messages
-        if isinstance(content, str) and not content.strip():
-            continue
-        elif isinstance(content, list):
-            if not any(part.get('text', '').strip() if part.get('type') == 'text' else True for part in content):
-                continue
-        elif not content:
-            continue
-        # Skip system messages
-        if msg.get("role") == "system":
-            continue
-
-        # Deduplicate
-        content_hash = content if isinstance(content, str) else str(content)
-        if content_hash in seen_contents:
-            continue
-        if content_hash:
-            seen_contents.add(content_hash)
-        filtered.append(msg)
-
-    # Filter whispers - only include whispers addressed to this AI
-    return [
-        msg for msg in filtered
-        if msg.get('_type') != 'whisper' or msg.get('_whisper_to', '').upper() == ai_name.upper()
-    ]
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("ai_name") == ai_name:
+            return True
+    return False
 
 
 def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=False, branch_output=None, streaming_callback=None, invite_tier="Both", prompt_modifications=None, ai_temperatures=None):
@@ -306,20 +211,157 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
     print(f"==================================================")
     print(f"Starting {model} turn ({ai_name})...")
     print(f"Current conversation length: {len(conversation)}")
+    
+    # HTML contributions and living document disabled
+    enhanced_system_prompt = system_prompt
 
+    # Operator-set system prompt for this agent (SYS button in the control panel)
+    control_panel = _get_control_panel(gui)
+    if control_panel is not None:
+        custom_prompt, replace_scenario = control_panel.get_agent_system_prompt(ai_name)
+        if custom_prompt:
+            if replace_scenario:
+                enhanced_system_prompt = custom_prompt
+            else:
+                enhanced_system_prompt = f"{enhanced_system_prompt}\n\n[Operator instructions for {ai_name}]\n{custom_prompt}"
+            print(f"[AI Turn] Applied operator system prompt for {ai_name} (replace={replace_scenario})")
+
+        # Group chat toolkit: make tools + @mentions available in every scenario
+        if control_panel.tools_enabled():
+            toolkit = build_agent_toolkit_prompt(enhanced_system_prompt)
+            if toolkit:
+                enhanced_system_prompt = f"{enhanced_system_prompt}\n\n{toolkit}"
+    
+    # The model parameter is now the actual model ID (from get_selected_model_id)
     model_id = model
+    
+    # Inject available models based on invite tier setting
+    from config import get_invite_models_text
+    models_text = get_invite_models_text(invite_tier)
+    
+    # Debug: log the tier setting and models text
+    print(f"[AI Turn] Tier setting: {invite_tier}")
+    print(f"[AI Turn] Models text: {models_text}")
+    
+    # Replace placeholder in prompt if exists, otherwise append
+    if "!add_ai" in enhanced_system_prompt:
+        # Find and update model list placeholder or existing model list
+        import re
+        # Match the placeholder text: [Models list injected based on tier setting]
+        placeholder_pattern = r'\[Models list injected based on tier setting\]'
+        # Match our emphatic format: ⚠️ ONLY USE FREE/PAID MODELS: ... — DO NOT ...
+        emphatic_pattern = r'⚠️ ONLY USE (?:FREE|PAID) MODELS:[^\n]*'
+        # Also match old format or "Available models" line
+        legacy_pattern = r'(?:FREE MODELS[^:]*:|PAID MODELS[^:]*:|Available[^:]*:)[^\n]*'
+        
+        if re.search(placeholder_pattern, enhanced_system_prompt):
+            # Replace the placeholder with actual model list
+            enhanced_system_prompt = re.sub(placeholder_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced placeholder with models list")
+        elif re.search(emphatic_pattern, enhanced_system_prompt):
+            # Replace existing emphatic model list line (from previous turn)
+            enhanced_system_prompt = re.sub(emphatic_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced emphatic models line")
+        elif re.search(legacy_pattern, enhanced_system_prompt):
+            # Replace legacy model list line
+            enhanced_system_prompt = re.sub(legacy_pattern, models_text, enhanced_system_prompt)
+            print(f"[AI Turn] Replaced legacy models line")
+        else:
+            # Add after !add_ai line if no placeholder found
+            enhanced_system_prompt = enhanced_system_prompt.replace(
+                '!add_ai "Model Name"',
+                f'!add_ai "Model Name"\n  {models_text}\n '
+            )
+            print(f"[AI Turn] Appended models list after !add_ai")
+    
+    # Prepend model identity to system prompt so AI knows who it is
+    display_name = get_display_name(model_id)
+    enhanced_system_prompt = f"You are {ai_name} ({display_name}).\n\n{enhanced_system_prompt}"
 
-    # Build enhanced system prompt
-    system_prompt = _prepare_system_prompt(ai_name, system_prompt, model_id, invite_tier, prompt_modifications)
+    # Shared briefing: each agent reads it once, before its first turn only
+    if control_panel is not None:
+        briefing = control_panel.get_briefing_prompt()
+        if briefing and not _has_spoken(conversation, ai_name):
+            enhanced_system_prompt = (
+                f"{enhanced_system_prompt}\n\n"
+                f"[BRIEFING — read this before your first message]\n{briefing}"
+            )
+            print(f"[AI Turn] Briefing injected for {ai_name} (first turn)")
+    
+    # Check for branch type and count AI responses
+    is_rabbithole = False
+    is_fork = False
+    branch_text = ""
+    ai_response_count = 0
+    found_branch_marker = False
+    latest_branch_marker_index = -1
 
-    # Detect branch context and potentially override prompt
-    is_rabbithole, is_fork, branch_text, ai_response_count = _detect_branch_context(conversation)
+    # First find the most recent branch marker
+    for i, msg in enumerate(conversation):
+        if isinstance(msg, dict) and msg.get("_type") == "branch_indicator":
+            latest_branch_marker_index = i
+            found_branch_marker = True
+            
+            # Determine branch type from the latest marker
+            msg_content = msg.get("content", "")
+            # Branch indicators are always plain strings
+            if isinstance(msg_content, str):
+                if "Rabbitholing down:" in msg_content:
+                    is_rabbithole = True
+                    branch_text = msg_content.split('"')[1] if '"' in msg_content else ""
+                    print(f"Detected rabbithole branch for: '{branch_text}'")
+                elif "Forking off:" in msg_content:
+                    is_fork = True
+                    branch_text = msg_content.split('"')[1] if '"' in msg_content else ""
+                    print(f"Detected fork branch for: '{branch_text}'")
+
+    # Now count AI responses that occur AFTER the latest branch marker
+    ai_response_count = 0
+    if found_branch_marker:
+        for i, msg in enumerate(conversation):
+            if i > latest_branch_marker_index and msg.get("role") == "assistant":
+                ai_response_count += 1
+        print(f"Counting AI responses after latest branch marker: found {ai_response_count} responses")
+    
+    # Handle branch-specific system prompts
+    
+    # For rabbitholing: override system prompt for first TWO responses
     if is_rabbithole and ai_response_count < 2:
         print(f"USING RABBITHOLE PROMPT: '{branch_text}' - response #{ai_response_count+1} after branch")
         system_prompt = f"'{branch_text}'!!!"
+    
+    # For forking: override system prompt ONLY for first response
     elif is_fork and ai_response_count == 0:
         print(f"USING FORK PROMPT: '{branch_text}' - response #{ai_response_count+1}")
         system_prompt = f"The conversation forks from'{branch_text}'. Continue naturally from this point."
+    
+    # For all other cases, use the standard system prompt
+    else:
+        if is_rabbithole:
+            print(f"USING STANDARD PROMPT: Past initial rabbithole exploration (responses after branch: {ai_response_count})")
+        elif is_fork:
+            print(f"USING STANDARD PROMPT: Past initial fork response (responses after branch: {ai_response_count})")
+    
+    # Apply the enhanced system prompt (with HTML contribution instructions)
+    system_prompt = enhanced_system_prompt
+
+    # Check if this AI has added to their prompt via !prompt command
+    if prompt_modifications and ai_name in prompt_modifications:
+        # Note: This is for compatibility - the variable name is prompt_modifications
+        # but it's actually used as prompt_additions (list-based)
+        if isinstance(prompt_modifications, dict) and ai_name in prompt_modifications:
+            if isinstance(prompt_modifications[ai_name], list):
+                # List-based additions (upstream approach)
+                additions = prompt_modifications[ai_name]
+                if additions:
+                    formatted_additions = "\n\n[Your remembered insights/perspectives]:\n- " + "\n- ".join(additions)
+                    system_prompt += formatted_additions
+                    print(f"[AI Turn] Applied {len(additions)} prompt additions for {ai_name}")
+            else:
+                # Single string (fallback for old approach)
+                custom_prompt = prompt_modifications[ai_name]
+                print(f"[AI Turn] Using custom prompt for {ai_name}: {custom_prompt[:100]}...")
+                system_prompt = custom_prompt
 
     # Get temperature for this AI (default 1.0)
     temperature = 1.0
@@ -327,11 +369,75 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
         temperature = ai_temperatures[ai_name]
         print(f"[AI Turn] Using custom temperature for {ai_name}: {temperature}")
 
-    # Build messages array starting with the system prompt
-    messages = [{"role": "system", "content": system_prompt}]
+    # CRITICAL: Always ensure we have the system prompt
+    # No matter what happens with the conversation, we need this
+    messages = []
+    messages.append({
+        "role": "system",
+        "content": system_prompt
+    })
+    
+    # Filter out any existing system messages that might interfere
+    filtered_conversation = []
+    for msg in conversation:
+        if not isinstance(msg, dict):
+            # Convert plain text to dictionary
+            msg = {"role": "user", "content": str(msg)}
+            
+        # Skip any hidden "connecting..." messages
+        msg_content = msg.get("content", "")
+        if msg.get("hidden") and isinstance(msg_content, str) and "connect" in msg_content.lower():
+            continue
+            
+        # Skip empty messages
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if not content.strip():
+                continue
+        elif isinstance(content, list):
+            # For structured content, skip if all parts are empty
+            if not any(part.get('text', '').strip() if part.get('type') == 'text' else True for part in content):
+                continue
+        else:
+            if not content:
+                continue
+            
+        # Skip system messages (we already added our own above)
+        if msg.get("role") == "system":
+            continue
+            
+        # Skip special system messages (branch indicators, etc.)
+        if msg.get("role") == "system" and msg.get("_type"):
+            continue
+            
+        # Skip duplicate messages - check if this exact content exists already
+        is_duplicate = False
+        for existing in filtered_conversation:
+            if existing.get("content") == msg.get("content"):
+                is_duplicate = True
+                content = msg.get('content', '')
+                # Safely preview content - handle both string and list (structured) content
+                if isinstance(content, str):
+                    preview = content[:30] + "..." if len(content) > 30 else content
+                else:
+                    preview = f"[structured content with {len(content)} parts]"
+                print(f"Skipping duplicate message: {preview}")
+                break
+                
+        if not is_duplicate:
+            filtered_conversation.append(msg)
 
-    # Filter conversation messages (removes system msgs, duplicates, wrong-target whispers)
-    filtered_conversation = _filter_conversation_messages(conversation, ai_name)
+    # Filter whisper messages - only include whispers addressed to this AI
+    whisper_filtered = []
+    for msg in filtered_conversation:
+        if msg.get('_type') == 'whisper':
+            # Only include whispers addressed to this AI
+            if msg.get('_whisper_to', '').upper() == ai_name.upper():
+                whisper_filtered.append(msg)
+            # Skip whispers for other AIs
+        else:
+            whisper_filtered.append(msg)
+    filtered_conversation = whisper_filtered
 
     # Process filtered conversation
     for i, msg in enumerate(filtered_conversation):
@@ -522,125 +628,16 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
                     "ai_name": ai_name
                 }
 
-        # ── Direct Provider Routing (Groq / Google / xAI / Kimi / Ollama) ──────
-        # Model IDs for direct providers use the format "provider::actual-model-id".
-        # These bypass OpenRouter and hit the provider's own OpenAI-compat endpoint.
-        if "::" in model_id:
-            provider, direct_model = model_id.split("::", 1)
-            print(f"[Direct] Routing to provider={provider} model={direct_model}")
-            prompt_content = messages[-1].get("content", "") if messages else "Connecting..."
-            context_messages = messages[:-1] if messages else []
-            response = call_direct_provider_api(
-                prompt_content,
-                context_messages,
-                provider,
-                direct_model,
-                system_prompt,
-                stream_callback=streaming_callback,
-                temperature=temperature,
-            )
-            return {
-                "role": "assistant",
-                "content": response,
-                "model": model,
-                "ai_name": ai_name,
-            }
-
-        # ── Smart Provider Routing ─────────────────────────────────────────────
-        # OpenRouter is ONLY used for :free models (saves your $2 balance).
-        # All paid models route directly to their provider's own API.
-        #
-        # Routing priority:
-        #   anthropic/*  → Anthropic direct  (ANTHROPIC_API_KEY)
-        #   openai/*     → OpenAI direct     (OPENAI_API_KEY)
-        #   google/gem*  → Google direct     (GOOGLE_API_KEY)
-        #   x-ai/*       → xAI direct        (XAI_API_KEY)
-        #   moonshotai/* → Kimi/Moonshot     (KIMIK2_API_KEY)
-        #   deepseek/*   → OpenRouter        (no direct key)
-        #   *:free       → OpenRouter        (free tier — your $2 account)
-        #   everything else → OpenRouter     (fallback; logged as warning)
-
+        # All text models route through OmniRoute. Media-specific Sora handling
+        # remains above because it returns a video artifact, not chat text.
         prompt_content = messages[-1].get("content", "Connecting...") if messages else "Connecting..."
         context_messages = messages[:-1] if messages else []
-
-        def _ok(content):
-            return {"role": "assistant", "content": content, "model": model, "ai_name": ai_name}
-
-        # Anthropic → direct
-        if model_id.startswith("anthropic/"):
-            actual = model_id.replace("anthropic/", "", 1)
-            print(f"[Anthropic Direct] {actual}")
-            return _ok(call_claude_api(
-                prompt_content, context_messages, actual,
-                system_prompt, stream_callback=streaming_callback, temperature=temperature
-            ))
-
-        # OpenAI → direct
-        if (model_id.startswith("openai/") or model_id.startswith("gpt-")
-                or model_id.startswith("o1") or model_id.startswith("o3")
-                or model_id in ("chatgpt-4o-latest",)):
-            actual = model_id.replace("openai/", "", 1)
-            print(f"[OpenAI Direct] {actual}")
-            return _ok(call_direct_provider_api(
-                prompt_content, context_messages, "openai-direct", actual,
-                system_prompt, streaming_callback, temperature
-            ))
-
-        # Google Gemini → direct
-        if model_id.startswith("google/gemini"):
-            actual = model_id.replace("google/", "", 1)
-            print(f"[Google Direct] {actual}")
-            return _ok(call_direct_provider_api(
-                prompt_content, context_messages, "google-direct", actual,
-                system_prompt, streaming_callback, temperature
-            ))
-
-        # xAI (Grok) → direct
-        if model_id.startswith("x-ai/"):
-            actual = model_id.replace("x-ai/", "", 1)
-            print(f"[xAI Direct] {actual}")
-            return _ok(call_direct_provider_api(
-                prompt_content, context_messages, "xai-direct", actual,
-                system_prompt, streaming_callback, temperature
-            ))
-
-        # Moonshot / Kimi → direct
-        if model_id.startswith("moonshotai/"):
-            actual = model_id.replace("moonshotai/", "", 1)
-            print(f"[Kimi Direct] {actual}")
-            return _ok(call_direct_provider_api(
-                prompt_content, context_messages, "kimi-direct", actual,
-                system_prompt, streaming_callback, temperature
-            ))
-
-        # FREE models → OpenRouter (this is what the $2 is for)
-        if model_id.endswith(":free"):
-            print(f"[OpenRouter Free] {model_id}")
-            response = call_openrouter_api(
-                prompt_content, context_messages, model_id,
-                system_prompt, stream_callback=streaming_callback, temperature=temperature
-            )
-            return _ok(response)
-
-        # DeepSeek → OpenRouter (no direct DeepSeek key; uses deepseek-specific parser)
-        if "deepseek" in model_id.lower():
-            print(f"[DeepSeek via OpenRouter] {model_id}")
-            response = call_deepseek_api(
-                prompt_content, context_messages, model_id, system_prompt,
-                stream_callback=streaming_callback
-            )
-            if isinstance(response, dict) and "content" in response:
-                response.update({"model": model, "role": "assistant", "ai_name": ai_name})
-                return response
-            return _ok(str(response) if response else "No response from model")
-
-        # Fallback → OpenRouter (Qwen, Meta, Mistral paid, unknown providers)
-        print(f"[OpenRouter Fallback] {model_id} — no direct key for this provider")
-        response = call_openrouter_api(
+        print(f"[OmniRoute] {model_id}")
+        response = call_omniroute_api(
             prompt_content, context_messages, model_id,
             system_prompt, stream_callback=streaming_callback, temperature=temperature
         )
-        return _ok(response)
+        return {"role": "assistant", "content": response, "model": model, "ai_name": ai_name}
             
     except Exception as e:
         error_message = f"Error making API request: {str(e)}"
@@ -659,6 +656,8 @@ def ai_turn(ai_name, conversation, model, system_prompt, gui=None, is_branch=Fal
 
 class ConversationManager:
     """Manages conversation processing and state"""
+    MAX_SUMMONS_PER_ROUND = 2  # cap on @mention-triggered extra replies per round
+
     def __init__(self, app):
         self.app = app
         self.workers = []  # Keep track of worker threads
@@ -666,12 +665,6 @@ class ConversationManager:
         # Initialize AI command state dictionaries
         self.ai_prompt_additions = {}  # Store prompt additions from !prompt command (list per AI)
         self.ai_temperatures = {}  # Store custom temperatures from !temperature command
-
-        # Initialize tracking dicts for in-flight operations
-        self._pending_notifications = {}  # Notification IDs for in-progress image generations
-        self._active_polls = []  # Active polls from !poll command
-        self._pending_ais = []  # AIs queued to join via !add_ai command
-        self._typing_indicators = {}  # Typing indicator messages per AI
 
         # Initialize the worker thread pool
         self.thread_pool = QThreadPool()
@@ -683,6 +676,10 @@ class ConversationManager:
         self.image_signals.image_failed.connect(self._on_image_failed)
 
         # Set up video update signals for thread-safe UI updates
+        self.web_tool_signals = WebToolSignals()
+        self.web_tool_signals.result_ready.connect(self._on_web_tool_ready)
+        self.web_tool_signals.failed.connect(self._on_web_tool_failed)
+
         self.video_signals = VideoUpdateSignals()
         self.video_signals.video_ready.connect(self._on_video_ready)
         self.video_signals.video_failed.connect(self._on_video_failed)
@@ -915,6 +912,7 @@ class ConversationManager:
             # Get AI's model name for consistent formatting
             ai_num = int(ai_name.split('-')[1]) if '-' in ai_name else 1
             model_name = self.get_model_for_ai(ai_num)
+            caller = self._format_caller(ai_name)
             
             # Create a failure notification message that AIs can see
             truncated_prompt = prompt[:50] + '...' if len(prompt) > 50 else prompt
@@ -930,20 +928,20 @@ class ConversationManager:
             error_lower = error.lower()
             if "402" in error or "credits" in error_lower or "insufficient" in error_lower:
                 simple_error = "insufficient API credits"
-                detail = "Check your OpenRouter balance"
+                detail = "Check XAI_API_KEY / OPENAI_API_KEY / OpenRouter balance"
             elif "429" in error or "rate" in error_lower or "limit" in error_lower:
                 simple_error = "rate limited"
                 detail = "Too many requests, please wait"
                 print(f"[Agent]   >>> RATE LIMITED - Full response: {error}")
             elif "401" in error or "unauthorized" in error_lower or "api key" in error_lower:
                 simple_error = "authentication failed"
-                detail = "Check your OPENROUTER_API_KEY"
+                detail = "Check XAI_API_KEY or OPENAI_API_KEY"
             elif "timeout" in error_lower:
                 simple_error = "request timed out"
                 detail = "Server took too long to respond"
             elif "500" in error or "502" in error or "503" in error or "server" in error_lower:
                 simple_error = "server error"
-                detail = "OpenRouter or model provider is having issues"
+                detail = "Grok Imagine, OpenAI, or OpenRouter is having issues"
             elif "modalities" in error_lower or "not support" in error_lower:
                 simple_error = "model doesn't support image generation"
                 detail = "Try a different image model"
@@ -982,6 +980,9 @@ class ConversationManager:
     def _remove_pending_notification(self, ai_name: str, prompt: str):
         """Remove the 'generating...' notification for a completed image/video"""
         prompt_key = f"{ai_name}:{prompt[:50]}"
+        
+        if not hasattr(self, '_pending_notifications'):
+            return
         
         notification_id = self._pending_notifications.get(prompt_key)
         if not notification_id:
@@ -1142,9 +1143,10 @@ class ConversationManager:
                     "_command_success": success,
                     "_notification_id": notification_id
                 }
+                self._track_pending_notification(cmd, username, success, message, notification_id)
                 self.app.main_conversation.append(notification_msg)
 
-        visible_conversation = get_visible_messages(self.app.main_conversation)
+        visible_conversation = [msg for msg in self.app.main_conversation if not msg.get('hidden', False)]
         self.app.left_pane.display_conversation(visible_conversation)
         self.update_conversation_html(self.app.main_conversation)
         return has_content or image_data or bool(commands)
@@ -1174,6 +1176,12 @@ class ConversationManager:
     def _process_input_step_mode(self, user_input=None):
         """Step mode: run a single AI turn per propagate click."""
         has_user_content = self._add_user_message(user_input)
+
+        # Operator @AI-N in step mode: that agent answers next
+        if user_input and self.app.right_sidebar.control_panel.tools_enabled():
+            mentioned = extract_mentions(user_input if isinstance(user_input, str) else str(user_input))
+            if mentioned:
+                self.app.right_sidebar.control_panel.next_turn_selector.setCurrentText(mentioned[0])
 
         num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
         selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
@@ -1273,7 +1281,7 @@ class ConversationManager:
 
         # Clear any pending AIs — they've already been added to the selector
         # so they'll be reached as part of the normal step sequence
-        if self._pending_ais:
+        if hasattr(self, '_pending_ais') and self._pending_ais:
             print(f"[Step] Clearing {len(self._pending_ais)} pending AI(s) — already added to lineup")
             self._pending_ais = []
 
@@ -1319,6 +1327,10 @@ class ConversationManager:
         """Normal mode: run all AIs sequentially in one propagate click."""
         self._add_user_message(user_input)
 
+        # New round: allow fresh @mention summons
+        self._summon_phase = False
+        self._summoned_this_round = set()
+
         # Get number of AIs from UI
         num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
 
@@ -1339,10 +1351,6 @@ class ConversationManager:
         max_iterations = int(self.app.right_sidebar.control_panel.iterations_selector.currentText())
         if user_input is not None or not self.app.main_conversation:
             self.app.turn_count = 0
-            # Clear stale in-flight state from previous conversation
-            self._pending_notifications.clear()
-            self._active_polls.clear()
-            self._pending_ais.clear()
             print(f"MAIN: Resetting turn count - starting new conversation with {max_iterations} iterations and {num_ais} AIs")
         else:
             print(f"MAIN: Continuing conversation - turn {self.app.turn_count+1} of {max_iterations}")
@@ -1449,9 +1457,10 @@ class ConversationManager:
         """Handle the completion of a full turn (both AIs)"""
         
         # Check for pending AIs that were added mid-round
-        if self._pending_ais:
+        if hasattr(self, '_pending_ais') and self._pending_ais:
             pending = self._pending_ais.copy()
             self._pending_ais = []  # Clear the queue
+            self._summon_phase = True  # Replies from here on can't trigger new summons
             
             print(f"[Agent] Processing {len(pending)} pending AI(s) added during this round")
             for idx, p in enumerate(pending):
@@ -1701,16 +1710,16 @@ class ConversationManager:
             conversation.append(user_message)
             
             # Update the conversation display with the new user message
-            visible_conversation = get_visible_messages(conversation)
+            visible_conversation = [msg for msg in conversation if not msg.get('hidden', False)]
             self.app.left_pane.display_conversation(visible_conversation, branch_data)
             
             # Update the HTML conversation document for the branch
             self.update_conversation_html(conversation)
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
+        ai_1_model = self.get_model_for_ai(1)
+        ai_2_model = self.get_model_for_ai(2)
+        ai_3_model = self.get_model_for_ai(3)
         selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
@@ -1887,6 +1896,8 @@ class ConversationManager:
         }
         
         # Store reference for removal later
+        if not hasattr(self, '_typing_indicators'):
+            self._typing_indicators = {}
         self._typing_indicators[ai_name] = typing_message
         
         # No animation timer needed - using static "thinking..." text
@@ -1913,7 +1924,7 @@ class ConversationManager:
     
     def _remove_typing_indicator(self, ai_name):
         """Remove typing indicator for an AI"""
-        if ai_name not in self._typing_indicators:
+        if not hasattr(self, '_typing_indicators') or ai_name not in self._typing_indicators:
             return
         
         typing_message = self._typing_indicators[ai_name]
@@ -1931,27 +1942,15 @@ class ConversationManager:
                 self.app.main_conversation.remove(typing_message)
     
     def _clear_all_typing_indicators(self):
-        """Remove all typing indicators and reset in-flight operation state"""
+        """Remove all typing indicators from conversation"""
+        if not hasattr(self, '_typing_indicators'):
+            return
         
         # Copy keys since we're modifying the dict
         ai_names = list(self._typing_indicators.keys())
         for ai_name in ai_names:
             self._remove_typing_indicator(ai_name)
-
-        # Clear pending notifications (in-progress image generations that may have leaked)
-        if self._pending_notifications:
-            print(f"[Cleanup] Clearing {len(self._pending_notifications)} pending notification(s)")
-            self._pending_notifications.clear()
-
-        # Clear active polls and pending AI invites
-        if self._active_polls:
-            print(f"[Cleanup] Clearing {len(self._active_polls)} active poll(s)")
-            self._active_polls.clear()
-
-        if self._pending_ais:
-            print(f"[Cleanup] Clearing {len(self._pending_ais)} pending AI invite(s)")
-            self._pending_ais.clear()
-
+    
     def on_ai_response_received(self, ai_name, response_content):
         """Handle AI responses for both main and branch conversations"""
         print(f"Response received from {ai_name}: {response_content[:100]}...")
@@ -2013,10 +2012,7 @@ class ConversationManager:
                 }
                 
                 # For in-progress notifications (success=None), store ID for later removal
-                if success is None and "(generating...)" in message:
-                    prompt_key = cmd.params.get('prompt', '')[:50] if cmd.params else ''
-                    self._pending_notifications[f"{ai_name}:{prompt_key}"] = notification_id
-                    print(f"[Agent] Stored pending notification ID: {notification_id} for {ai_name}:{prompt_key[:30]}...")
+                self._track_pending_notification(cmd, ai_name, success, message, notification_id)
                 
                 # Add to the correct conversation (no render yet - batch it)
                 if self.app.active_branch:
@@ -2034,6 +2030,9 @@ class ConversationManager:
                 if hasattr(self.app, 'notification_label'):
                     self.app.notification_label.setText(message)
         
+        # @AI-N mentions summon that agent for a reply (group-chat bot behaviour)
+        self._handle_mentions(cleaned_content, ai_name)
+
         # Use cleaned content (commands stripped out) for the conversation
         response_content = cleaned_content
         
@@ -2096,11 +2095,11 @@ class ConversationManager:
             branch_id = self.app.active_branch
             if branch_id in self.app.branch_conversations:
                 branch_data = self.app.branch_conversations[branch_id]
-                visible = get_visible_messages(branch_data['conversation'])
+                visible = [msg for msg in branch_data['conversation'] if not msg.get('hidden', False)]
                 self.app.left_pane.conversation = visible
                 self.app.left_pane.render_conversation(immediate=True)
         else:
-            visible = get_visible_messages(self.app.main_conversation)
+            visible = [msg for msg in self.app.main_conversation if not msg.get('hidden', False)]
             self.app.left_pane.conversation = visible
             self.app.left_pane.render_conversation(immediate=True)
         
@@ -2179,7 +2178,10 @@ class ConversationManager:
         enhanced_prompt = f"You are the artist/chronicler of an exchange between multiple AIs. Create an image using the following ai text contribution as inspiration. DO NOT merely repeat text in the image. Interpret the text in image form.{prompt}"
         
         # Generate the image
-        result = generate_image_from_text(enhanced_prompt)
+        speaker_model = None
+        if self._is_ai_name(ai_name):
+            speaker_model = self.get_model_for_ai(int(ai_name.split('-')[1]))
+        result = generate_image_from_text(enhanced_prompt, caller_model=speaker_model)
         
         if result["success"]:
             # Display the image in the UI
@@ -2263,6 +2265,8 @@ class ConversationManager:
             return self._execute_mute_command(ai_name)
         elif action == 'search':
             return self._execute_search_command(params.get('query', ''), ai_name)
+        elif action == 'fetch':
+            return self._execute_fetch_command(params.get('url', ''), ai_name)
         elif action == 'prompt':
             return self._execute_prompt_command(params.get('text', ''), ai_name)
         elif action == 'temperature':
@@ -2298,7 +2302,7 @@ class ConversationManager:
                 enhanced_prompt = f"Create an image inspired by the following description from an AI conversation: {prompt}"
                 
                 print(f"[Agent] Starting image generation...")
-                result = generate_image_from_text(enhanced_prompt)
+                result = generate_image_from_text(enhanced_prompt, caller_model=model_name)
                 
                 if result.get('success'):
                     image_path = result['image_path']
@@ -2527,6 +2531,8 @@ class ConversationManager:
             self.app.custom_personas[f"AI-{new_num}"] = persona
         
         # Track this AI as pending so it can join the current round
+        if not hasattr(self, '_pending_ais'):
+            self._pending_ais = []
         
         # Check if this model is already an active AI (deduplication)
         # Check setting for whether duplicates are allowed
@@ -2599,8 +2605,24 @@ class ConversationManager:
         self.app.muted_ais.add(ai_name)
         return True, f"🔇 [{caller}]: !mute_self"
 
+    @staticmethod
+    def _pending_key(params: dict) -> str:
+        """Key that ties an in-progress notification to its background result."""
+        params = params or {}
+        return (params.get('prompt') or params.get('query') or params.get('url') or '')[:50]
+
+    def _track_pending_notification(self, cmd, ai_name, success, message, notification_id):
+        """Remember in-progress notifications so they can be removed when the job finishes."""
+        if success is not None or not any(m in message for m in IN_PROGRESS_MARKERS):
+            return
+        if not hasattr(self, '_pending_notifications'):
+            self._pending_notifications = {}
+        key = self._pending_key(cmd.params)
+        self._pending_notifications[f"{ai_name}:{key}"] = notification_id
+        print(f"[Agent] Stored pending notification ID: {notification_id} for {ai_name}:{key[:30]}...")
+
     def _execute_search_command(self, query: str, ai_name: str) -> tuple[bool, str]:
-        """Execute a web search command and inject results into conversation."""
+        """Run a web search on a background thread; results are posted when ready."""
         from shared_utils import web_search
         caller = self._format_caller(ai_name)
 
@@ -2608,39 +2630,157 @@ class ConversationManager:
             return False, f"❌ [{caller}]: !search — query too short"
 
         print(f"[Agent] Searching for {caller}: {query}")
+        pending_key = self._pending_key({'query': query})
 
-        # Perform the search
-        search_result = web_search(query, max_results=5)
+        def _run_search_job():
+            try:
+                search_result = web_search(query, max_results=5)
+                if not search_result.get('success'):
+                    error_msg = search_result.get('error', 'Unknown error')
+                    self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — {error_msg}")
+                    return
+                results = search_result.get('results', [])
+                if not results:
+                    self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — no results found")
+                    return
 
-        if not search_result.get('success'):
-            error_msg = search_result.get('error', 'Unknown error')
-            return False, f"❌ [{caller}]: !search \"{query}\" — {error_msg}"
+                formatted = f"🔍 [{caller}]: !search \"{query}\"\n\n**Search Results:**\n"
+                for i, r in enumerate(results, 1):
+                    formatted += f"\n{i}. **{r.get('title', 'No title')}**\n"
+                    formatted += f"   {r.get('snippet', 'No snippet')}\n"
+                    formatted += f"   Source: {r.get('url', 'No URL')}\n"
 
-        # Format results for display
-        results = search_result.get('results', [])
-        if not results:
-            return False, f"❌ [{caller}]: !search \"{query}\" — no results found"
+                search_message = {
+                    "role": "user",
+                    "content": formatted,
+                    "_type": "search_result",
+                    "hidden": False
+                }
+                summary = f"🔍 [{caller}]: !search \"{query}\" (found {len(results)} results)"
+                self.web_tool_signals.result_ready.emit(ai_name, pending_key, search_message, summary)
+            except Exception as e:
+                print(f"[Agent] Search job failed: {e}")
+                self.web_tool_signals.failed.emit(ai_name, pending_key, f"!search \"{query}\" — {e}")
 
-        # Format results for conversation context (with markdown formatting)
-        formatted = f"🔍 [{caller}]: !search \"{query}\"\n\n**Search Results:**\n"
-        for i, r in enumerate(results, 1):
-            formatted += f"\n{i}. **{r.get('title', 'No title')}**\n"
-            formatted += f"   {r.get('snippet', 'No snippet')}\n"
-            formatted += f"   Source: {r.get('url', 'No URL')}\n"
+        threading.Thread(target=_run_search_job, daemon=True).start()
+        return None, f"🔍 [{caller}]: !search \"{query}\" (searching...)"
 
-        # Add search results to conversation so all AIs can see them
-        search_message = {
-            "role": "user",
-            "content": formatted,
-            "_type": "search_result",
-            "hidden": False
+    def _execute_fetch_command(self, url: str, ai_name: str) -> tuple[bool, str]:
+        """Fetch a public web page on a background thread; an excerpt is posted when ready."""
+        from shared_utils import fetch_url_text
+        caller = self._format_caller(ai_name)
+
+        if not url or len(url.strip()) < 4:
+            return False, f"❌ [{caller}]: !fetch — no URL given"
+
+        print(f"[Agent] Fetching for {caller}: {url}")
+        pending_key = self._pending_key({'url': url})
+
+        def _run_fetch_job():
+            try:
+                result = fetch_url_text(url)
+                if not result.get('success'):
+                    self.web_tool_signals.failed.emit(
+                        ai_name, pending_key, f"!fetch \"{url}\" — {result.get('error', 'failed')}")
+                    return
+                title = result.get('title') or result.get('url')
+                fetch_message = {
+                    "role": "user",
+                    "content": (
+                        f"🌐 [{caller}]: !fetch \"{result.get('url')}\"\n\n"
+                        f"**{title}**\n\n{result.get('text')}"
+                    ),
+                    "_type": "search_result",
+                    "hidden": False
+                }
+                summary = f"🌐 [{caller}]: !fetch \"{title[:60]}\""
+                self.web_tool_signals.result_ready.emit(ai_name, pending_key, fetch_message, summary)
+            except Exception as e:
+                print(f"[Agent] Fetch job failed: {e}")
+                self.web_tool_signals.failed.emit(ai_name, pending_key, f"!fetch \"{url}\" — {e}")
+
+        threading.Thread(target=_run_fetch_job, daemon=True).start()
+        return None, f"🌐 [{caller}]: !fetch \"{url[:60]}\" (fetching...)"
+
+    def _active_conversation(self):
+        if self.app.active_branch and self.app.active_branch in self.app.branch_conversations:
+            return self.app.branch_conversations[self.app.active_branch]['conversation']
+        return self.app.main_conversation
+
+    def _on_web_tool_ready(self, ai_name: str, pending_key: str, chat_message: dict, summary: str):
+        """Main thread: post a finished !search / !fetch result so every agent can read it."""
+        self._remove_pending_notification(ai_name, pending_key)
+        conversation = self._active_conversation()
+        conversation.append(chat_message)
+        self._post_notification(summary, True)
+        self.app.left_pane.conversation = conversation
+        self.app.left_pane.render_conversation()
+
+    def _on_web_tool_failed(self, ai_name: str, pending_key: str, error_message: str):
+        """Main thread: replace the in-progress notice with the failure."""
+        self._remove_pending_notification(ai_name, pending_key)
+        caller = self._format_caller(ai_name)
+        self._post_notification(f"❌ [{caller}]: {error_message}", False)
+        conversation = self._active_conversation()
+        self.app.left_pane.conversation = conversation
+        self.app.left_pane.render_conversation()
+
+    def _handle_mentions(self, text: str, speaker: str):
+        """Grok-bot style summons: @AI-N in a reply queues that agent for an extra reply."""
+        control_panel = self.app.right_sidebar.control_panel
+        if not control_panel.tools_enabled():
+            return
+        num_ais = int(control_panel.num_ais_selector.currentText())
+        targets = [t for t in extract_mentions(text)
+                   if t != speaker and int(t.split('-')[1]) <= num_ais]
+        if not targets:
+            return
+
+        caller = self._format_caller(speaker)
+
+        # Step mode: the first mentioned agent simply speaks next
+        if control_panel.is_step_mode():
+            control_panel.next_turn_selector.setCurrentText(targets[0])
+            self._post_notification(f"📣 [{caller}] pinged {targets[0]} — up next", None)
+            return
+
+        # Normal mode: summons run after the round; replies to summons can't summon again
+        if getattr(self, '_summon_phase', False):
+            return
+        if not hasattr(self, '_pending_ais'):
+            self._pending_ais = []
+        summoned = getattr(self, '_summoned_this_round', set())
+        for target in targets:
+            if len(summoned) >= self.MAX_SUMMONS_PER_ROUND:
+                break
+            if target in summoned or any(p['ai_name'] == target for p in self._pending_ais):
+                continue
+            ai_number = int(target.split('-')[1])
+            self._pending_ais.append({
+                'ai_name': target,
+                'model': self.get_model_for_ai(ai_number),
+                'persona': None,
+                'invited_by': speaker,
+                'summon': True,
+            })
+            summoned.add(target)
+            self._post_notification(f"📣 [{caller}] pinged {target} — they'll reply at the end of this round", None)
+        self._summoned_this_round = summoned
+
+    def _post_notification(self, message: str, success):
+        """Append an agent notification to the active conversation."""
+        notification = {
+            "role": "system",
+            "content": message,
+            "_type": "agent_notification",
+            "_command_success": success,
         }
-        self.app.main_conversation.append(search_message)
-
-        # Trigger UI update by redisplaying conversation
-        self.app.left_pane.display_conversation(self.app.main_conversation)
-
-        return True, f"🔍 [{caller}]: !search \"{query}\" (found {len(results)} results)"
+        if self.app.active_branch and self.app.active_branch in self.app.branch_conversations:
+            self.app.branch_conversations[self.app.active_branch]['conversation'].append(notification)
+        else:
+            self.app.main_conversation.append(notification)
+        if hasattr(self.app, 'notification_label'):
+            self.app.notification_label.setText(message)
 
     def _execute_prompt_command(self, text: str, ai_name: str) -> tuple[bool, str]:
         """Execute a prompt addition command - appends to system prompt.
@@ -2690,11 +2830,10 @@ class ConversationManager:
         except (ValueError, TypeError):
             return False, f"❌ [{caller}]: !temperature — invalid value '{value}'"
 
-        # Store the temperature for this AI, tracking previous value
-        prev_temp = self.ai_temperatures.get(ai_name, 1.0)
+        # Store the temperature for this AI
         self.ai_temperatures[ai_name] = temp
 
-        print(f"[Agent] {caller} set their temperature to {temp} (was {prev_temp})")
+        print(f"[Agent] {caller} set their temperature to {temp}")
 
         # Add a subtle notification to conversation context (visible to other AIs)
         context_notification = {
@@ -2707,8 +2846,8 @@ class ConversationManager:
         # Trigger UI update by redisplaying conversation
         self.app.left_pane.display_conversation(self.app.main_conversation)
 
-        # Show previous and new value in notification for human
-        return True, f"🌡️ [{caller}]: !temperature {temp} (was {prev_temp})"
+        # Show the actual value in notification for human
+        return True, f"🌡️ [{caller}]: !temperature {temp}"
 
     def _execute_vote_command(self, question: str, options_str: str, ai_name: str) -> tuple[bool, str]:
         """Execute a vote/poll command - creates a poll visible to all AIs."""
@@ -2731,6 +2870,8 @@ class ConversationManager:
             poll_text += "\n  (Open-ended — respond with your thoughts)"
 
         # Store active poll for tracking
+        if not hasattr(self, '_active_polls'):
+            self._active_polls = []
         self._active_polls.append({
             'question': question,
             'options': options,
@@ -2740,39 +2881,43 @@ class ConversationManager:
 
         return True, poll_text
 
+    def _whisper_roster(self) -> list:
+        """Active AI slots as (name, model_id, display_name)."""
+        num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
+        roster = []
+        for i in range(1, num_ais + 1):
+            model_id = self.get_model_for_ai(i) or ""
+            roster.append((f"AI-{i}", model_id, get_display_name(model_id) or model_id))
+        return roster
+
     def _execute_whisper_command(self, target: str, message: str, ai_name: str) -> tuple[bool, str]:
-        """Execute a whisper command - private message to a specific AI."""
+        """Private to the target AI; the human operator still sees the text."""
         caller = self._format_caller(ai_name)
 
         if not target or not message:
             return False, f"❌ [{caller}]: !whisper — missing target or message"
 
-        # Normalize target (accept "AI-1", "ai-1", "1", etc.)
-        target_normalized = target.upper().strip()
-        if not target_normalized.startswith('AI-'):
-            target_normalized = f"AI-{target_normalized}"
+        roster = self._whisper_roster()
+        target_name, error = resolve_participant_target(target, roster)
+        if error:
+            return False, f"❌ [{caller}]: !whisper — {error}"
 
-        # Check if target AI exists (based on current number of AIs)
-        try:
-            target_num = int(target_normalized.split('-')[1])
-            num_ais = int(self.app.right_sidebar.control_panel.num_ais_selector.currentText())
-            if target_num < 1 or target_num > num_ais:
-                return False, f"❌ [{caller}]: !whisper — {target_normalized} doesn't exist (only {num_ais} AIs active)"
-        except (ValueError, IndexError):
-            return False, f"❌ [{caller}]: !whisper — invalid target '{target}'"
+        target_entry = next(p for p in roster if p[0] == target_name)
+        target_model = target_entry[1]
+        target_label = f"{target_name} ({target_model})" if target_model else target_name
 
-        # Add the whisper as a hidden message that only appears in the target's context
-        # We create a special message that gets filtered per-AI during turn processing
         whisper_msg = {
             "role": "system",
             "content": f"[Private whisper from {caller}]: {message}",
             "_type": "whisper",
             "_whisper_from": ai_name,
-            "_whisper_to": target_normalized,
-            "hidden": True  # Hidden from main display
+            "_whisper_to": target_name,
+            "_whisper_to_model": target_model,
+            "_whisper_text": message,
+            "ai_name": ai_name,
+            "hidden": False,
         }
 
-        # Add to conversation
         if self.app.active_branch:
             branch_id = self.app.active_branch
             if branch_id in self.app.branch_conversations:
@@ -2782,8 +2927,8 @@ class ConversationManager:
                 self.app.main_conversation = []
             self.app.main_conversation.append(whisper_msg)
 
-        # Show notification (visible) but actual whisper content is private
-        return True, f"🤫 [{caller}]: whispered to {target_normalized}"
+        # Notification has no body so other AIs don't learn the secret from the system line.
+        return True, f"🤫 [{caller}] → {target_label}"
 
     def get_model_for_ai(self, ai_number):
         """Get the selected model ID for the AI by number (1-5)"""
@@ -2901,7 +3046,7 @@ class ConversationManager:
         self.app.active_branch = branch_id
         
         # Update the UI
-        visible_conversation = get_visible_messages(branch_conversation)
+        visible_conversation = [msg for msg in branch_conversation if not msg.get('hidden', False)]
         self.app.left_pane.display_conversation(visible_conversation, self.app.branch_conversations[branch_id])
         
         # Add node to network graph
@@ -3010,7 +3155,7 @@ class ConversationManager:
         self.app.active_branch = branch_id
         
         # Update the UI
-        visible_conversation = get_visible_messages(branch_conversation)
+        visible_conversation = [msg for msg in branch_conversation if not msg.get('hidden', False)]
         self.app.left_pane.display_conversation(visible_conversation, self.app.branch_conversations[branch_id])
         
         # Add node to network graph
@@ -3046,9 +3191,9 @@ class ConversationManager:
             # No need to update display since message is hidden
         
         # Get selected models and prompt pair from UI
-        ai_1_model = self.app.right_sidebar.control_panel.ai1_model_selector.currentText()
-        ai_2_model = self.app.right_sidebar.control_panel.ai2_model_selector.currentText()
-        ai_3_model = self.app.right_sidebar.control_panel.ai3_model_selector.currentText()
+        ai_1_model = self.get_model_for_ai(1)
+        ai_2_model = self.get_model_for_ai(2)
+        ai_3_model = self.get_model_for_ai(3)
         selected_prompt_pair = self.app.right_sidebar.control_panel.prompt_pair_selector.currentText()
         
         # Check if we've already had AI responses in this branch
@@ -3287,6 +3432,12 @@ class ConversationManager:
             border-left-color: var(--accent-green);
             background: rgba(16, 185, 129, 0.06);
             font-size: 0.9em;
+        }
+
+        .message.whisper {
+            border-left: 3px dashed var(--accent-yellow);
+            background: rgba(251, 191, 36, 0.06);
+            font-style: italic;
         }
         
         .message-content {
@@ -3536,6 +3687,8 @@ class ConversationManager:
                 message_class = role
                 if msg_type == "agent_notification":
                     message_class = "agent-notification"
+                elif msg_type == "whisper":
+                    message_class = "whisper"
                 elif msg_type == "generated_image":
                     message_class = "generated-image"
                 
@@ -3596,6 +3749,19 @@ class ConversationManager:
                         html_content += f' <span class="timestamp">{timestamp}</span></div>'
                     else:
                         html_content += f'\n                <div class="header"><span class="ai-name human">Human User</span> <span class="timestamp">{timestamp}</span></div>'
+                elif msg_type == "whisper":
+                    from_name = msg.get("_whisper_from", ai_name or "AI")
+                    to_name = msg.get("_whisper_to", "")
+                    to_model = msg.get("_whisper_to_model", "")
+                    dest = f"{to_name} ({to_model})" if to_model else to_name
+                    html_content += (
+                        f'\n                <div class="header">'
+                        f'<span class="ai-name system">🤫 WHISPER {from_name} → {dest}</span>'
+                        f' <span class="timestamp">{timestamp}</span></div>'
+                    )
+                    if msg.get("_whisper_text"):
+                        processed_content = self.app.left_pane.process_content_with_code_blocks(msg.get("_whisper_text"))
+                        processed_content = self.apply_greentext_styling(processed_content)
                 elif role == "system" and msg_type != "agent_notification":
                     html_content += f'\n                <div class="header"><span class="ai-name system">System</span> <span class="timestamp">{timestamp}</span></div>'
                 
@@ -3735,8 +3901,28 @@ class LiminalBackroomsManager:
         # Initialize the application
         self.initialize()
 
+def _unhide_qt_plugins():
+    """macOS UF_HIDDEN on PyQt plugin dylibs makes Qt skip cocoa and abort."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import subprocess
+        import PyQt6
+        plugin_dir = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6", "plugins")
+        if os.path.isdir(plugin_dir):
+            subprocess.run(
+                ["chflags", "-R", "nohidden", plugin_dir],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
+
+
 def create_gui():
     """Create the GUI application"""
+    _unhide_qt_plugins()
     app = QApplication(sys.argv)
     
     # Platform-specific setup for taskbar/dock icon
@@ -3822,8 +4008,8 @@ def run_gui(main_window, app):
                 f.write(''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
                 f.write(f"{'=' * 60}\n")
             print(f"[CRASH] Details logged to: {crash_log}")
-        except Exception as e:
-            print(f"[CRASH] Failed to write crash log: {e}")
+        except:
+            pass
         
         # Call the default handler
         sys.__excepthook__(exc_type, exc_value, exc_traceback)

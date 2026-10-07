@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
+import requests
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QFormLayout, QScrollArea, QWidget,
@@ -15,6 +16,15 @@ ENV_PATH = Path(__file__).parent / ".env"
 
 # Provider definitions: display name, env var, base URL, which model prefixes it handles
 PROVIDERS = [
+    {
+        "name": "OmniRoute (all text models)",
+        "env": "OMNIROUTE_API_KEY",
+        "url_env": "OMNIROUTE_BASE_URL",
+        "url": "http://127.0.0.1:20128/v1",
+        "routes": ["all text models"],
+        "color": "#00FF41",
+        "placeholder": "Optional for local OmniRoute",
+    },
     {
         "name": "Anthropic",
         "env": "ANTHROPIC_API_KEY",
@@ -106,8 +116,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "OpenRouter is used ONLY for :free models. "
-            "All paid models route directly to their provider."
+            "All text models route through OmniRoute. Provider credentials and fallback live there."
         )
         subtitle.setStyleSheet("color: #888; font-size: 11px;")
         subtitle.setWordWrap(True)
@@ -234,10 +243,10 @@ class SettingsDialog(QDialog):
             form.addRow("Routes:", routes_label)
             form.addRow(f"{env}:", row)
 
-            # Extra URL field for Ollama
+            # Extra base URL field for OmniRoute and Ollama
             if prov.get("url_env"):
                 url_field = QLineEdit()
-                url_field.setPlaceholderText("http://localhost:11434/v1")
+                url_field.setPlaceholderText(prov.get("url", ""))
                 url_field.setText(self._env_vals.get(prov["url_env"], ""))
                 self._fields[prov["url_env"]] = url_field
                 form.addRow("Base URL:", url_field)
@@ -254,28 +263,58 @@ class SettingsDialog(QDialog):
 
         info = QLabel(
             "<b>How routing works:</b><br><br>"
-            "When you pick a model and start a conversation, the app looks at the model ID<br>"
-            "and routes to the cheapest/most direct provider:<br><br>"
-            "<code style='color:#00FF41'>anthropic/claude-*</code> → Anthropic API (direct)<br>"
-            "<code style='color:#00FF41'>openai/gpt-*, o1, o3</code> → OpenAI API (direct)<br>"
-            "<code style='color:#00FF41'>google/gemini-*</code> → Google API (direct)<br>"
-            "<code style='color:#00FF41'>x-ai/grok-*</code> → xAI API (direct)<br>"
-            "<code style='color:#00FF41'>moonshotai/*</code> → Moonshot/Kimi API (direct)<br>"
-            "<code style='color:#00FF41'>groq::*</code> → Groq API (fast + cheap)<br>"
-            "<code style='color:#00FF41'>ollama::*</code> → Ollama (local/remote)<br>"
-            "<code style='color:#F59E0B'>*:free</code> → OpenRouter (your $2 account)<br>"
-            "<code style='color:#F59E0B'>deepseek/*, qwen/*, meta-llama/*</code> → OpenRouter<br><br>"
+            "When you pick a text model, Liminal Backrooms sends its exact OmniRoute ID to:<br><br>"
+            "<code style='color:#00FF41'>http://127.0.0.1:20128/v1</code> → OmniRoute<br><br>"
+            "OmniRoute then selects configured provider credentials and fallback.<br>"
+            "Pick a provider prefix in the model list (agy, cx/codex, xai, grok-cli, "
+            "anthropic, gemini, …). Those IDs are the OmniRoute endpoint.<br><br>"
             "<span style='color:#888; font-size:10px;'>"
-            "OpenRouter is only charged for :free tier models and providers without direct keys.<br>"
-            "Add direct API keys above to avoid OpenRouter charges for paid models."
+            "Sora video and image generation keep their specialized API paths."
             "</span>"
         )
         info.setTextFormat(Qt.TextFormat.RichText)
         info.setWordWrap(True)
         info.setStyleSheet("padding: 16px; background: #0d0d0d; border: 1px solid #222; border-radius: 4px; line-height: 1.6;")
         vbox.addWidget(info)
+
+        self._health_label = QLabel("OmniRoute status: not checked")
+        self._health_label.setStyleSheet("color: #888; padding: 8px;")
+        vbox.addWidget(self._health_label)
+
+        test_btn = QPushButton("Test OmniRoute")
+        test_btn.setStyleSheet(
+            "QPushButton { background: #111; color: #00FF41; padding: 8px 16px; "
+            "border: 1px solid #00FF41; border-radius: 4px; }"
+            "QPushButton:hover { background: #1a1a1a; }"
+        )
+        test_btn.clicked.connect(self._test_omniroute)
+        vbox.addWidget(test_btn)
         vbox.addStretch()
         return widget
+
+    def _test_omniroute(self):
+        base_url = (self._fields.get("OMNIROUTE_BASE_URL").text().strip()
+                    if "OMNIROUTE_BASE_URL" in self._fields
+                    else "") or "http://127.0.0.1:20128/v1"
+        base_url = base_url.rstrip("/")
+        headers = {"Accept": "application/json"}
+        api_key = ""
+        if "OMNIROUTE_API_KEY" in self._fields:
+            api_key = self._fields["OMNIROUTE_API_KEY"].text().strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            response = requests.get(f"{base_url}/models", headers=headers, timeout=5)
+            if response.status_code == 200:
+                count = len(response.json().get("data", []))
+                self._health_label.setText(f"OmniRoute status: reachable ({count} models)")
+                self._health_label.setStyleSheet("color: #00FF41; padding: 8px;")
+            else:
+                self._health_label.setText(f"OmniRoute status: HTTP {response.status_code}")
+                self._health_label.setStyleSheet("color: #ff5555; padding: 8px;")
+        except requests.exceptions.RequestException as exc:
+            self._health_label.setText(f"OmniRoute status: unreachable ({exc})")
+            self._health_label.setStyleSheet("color: #ff5555; padding: 8px;")
 
     def _mask(self, val: str) -> str:
         if not val or len(val) < 8:

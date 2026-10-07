@@ -1,0 +1,32 @@
+{
+  "$schema": "/Users/patrickgallowaypro/.agents/skills/llm-council/references/schemas/task_spec.schema.json",
+  "task": "Review the upgraded LLM Council implementation and produce a production-hardening implementation plan. Focus on correctness, OmniRoute routing guarantees, failure recovery, auditability, UI accuracy, security, tests, and the smallest high-value follow-up changes.",
+  "constraints": [
+    "Inspect the current implementation under /Users/patrickgallowaypro/.agents/skills/llm-council",
+    "Preserve backward compatibility with existing agents.json files and non-OmniRoute agent kinds",
+    "Keep LLM Council a thin orchestrator and keep provider routing and credentials in OmniRoute",
+    "Do not execute commands suggested by planner output",
+    "Prefer small, testable changes over new framework layers"
+  ],
+  "repo_context": {
+    "root": "/Users/patrickgallowaypro/.agents/skills/llm-council",
+    "paths": [
+      "scripts/llm_council.py",
+      "scripts/ui/",
+      "tests/test_llm_council.py",
+      "references/"
+    ],
+    "notes": "Current implementation has live OmniRoute preflight, explicit models, quorum, retries, manifests, attempt JSONL, inspect command, runtime preferences, and enhanced local UI. Determine remaining correctness gaps and sequence fixes by risk."
+  },
+  "preferences": {
+    "max_plans": 3,
+    "min_valid_plans": 2,
+    "time_budget_sec": 900,
+    "planner_timeout_sec": 300,
+    "judge_timeout_sec": 300,
+    "judge_fallback": "none",
+    "open_ui": true,
+    "ui_keepalive_sec": 1200,
+    "random_seed": 20260825
+  }
+}

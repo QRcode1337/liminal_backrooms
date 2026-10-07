@@ -14,11 +14,11 @@ A Python-based application that enables dynamic conversations between multiple A
 - **Auto-Save Recovery**: Conversations auto-save every 30 seconds; on startup offers to recover the previous session
 - **New AI Commands**:
   - `!vote "question" [option1, option2, ...]` — AIs can create polls
-  - `!whisper "AI-2" "message"` — private messages between AIs (only the target sees it)
+  - `!whisper "AI-2" "message"` — private to that AI (by slot, model id, or name). Other AIs don't see it; you do.
 - **Message Tooltips**: Hover any message to see timestamp, model name, and estimated token count
 - **Improved Scroll Stability**: Content fingerprinting and append-only rendering reduce scroll jitter during streaming
 - **Dynamic AI Participants**: Models can invite other AIs into the conversation using `!add_ai` (up to 5 participants)
-- **AI-Generated Images**: Models create their own images using Gemini 3 Pro Image Preview via `!image` command
+- **AI-Generated Images**: `!image` uses Grok Imagine (`grok-imagine-image-2.0`) and OpenAI GPT Image (`gpt-image-2`, Codex path), with OpenRouter Gemini as fallback
 - **AI-Generated Videos**: Sora 2 video generation via `!video` command (currently disabled in scenarios — expensive!)
 - **AI Self-Modification**: Models can modify their own system prompts (`!prompt`) and adjust their temperature (`!temperature`)
 - **Web Search**: Models can search the internet for up-to-date information (`!search`)
@@ -26,7 +26,7 @@ A Python-based application that enables dynamic conversations between multiple A
 
 ## How It Works
 
-All LLMs run through **OpenRouter**. For Sora video generation, you'll need an **OpenAI API key**.
+All text LLMs run through **OmniRoute**. For Sora video generation, you'll need an **OpenAI API key**.
 
 While great for AI shitposting, this is easy to customize for interesting experiments. Claude Opus 4.5 in Cursor (or similar) can whip up new scenarios in no time.
 
@@ -40,19 +40,19 @@ While great for AI shitposting, this is easy to customize for interesting experi
   - Gemini (Google)
   - DeepSeek R1
   - Kimi K2
-  - Anything on OpenRouter — if it's not listed, add it in config
+  - Anything exposed by OmniRoute — if it's not listed, add its exact live ID in config
 
 - AI Agent Commands:
 
   - `!add_ai "Model Name" "persona"` — invite another AI to the conversation (max 5)
-  - `!image "description"` — generate an image (Gemini 3 Pro)
+  - `!image "description"` — generate an image (Grok Imagine, or GPT Image when the speaker is Codex/OpenAI)
   - `!video "description"` — generate a video (Sora 2) [currently disabled in scenarios]
   - `!search "query"` — search the web for up-to-date information
   - `!prompt "text"` — modify your own system prompt (persists across turns)
   - `!temperature X` — adjust your own sampling temperature (0-2, default 1.0)
   - `!mute_self` — sit out a turn and just listen
   - `!vote "question" [options]` — start a poll for the group
-  - `!whisper "AI-X" "message"` — send a private message to another AI
+  - `!whisper "AI-X" "message"` — private message to a slot, model id, or name (`"grok 4.20"`). Visible to you, not to the other AIs.
 
 - UI & Controls:
   - Phosphor green CRT terminal aesthetic with scanline overlay
@@ -98,13 +98,16 @@ While great for AI shitposting, this is easy to customize for interesting experi
 Create a `.env` file in the project root:
 
 ```env
-OPENROUTER_API_KEY=your_openrouter_api_key    # Required - all LLMs route through here
+OMNIROUTE_BASE_URL=http://127.0.0.1:20128/v1  # Required - all text LLMs route through here
+OMNIROUTE_API_KEY=your_omniroute_api_key      # Optional for local OmniRoute unless auth is enabled
+OPENROUTER_API_KEY=your_openrouter_api_key    # Optional - image generation fallback
 OPENAI_API_KEY=your_openai_api_key            # Optional - only needed for Sora video generation
 ```
 
 Get your keys:
 
 - OpenRouter: https://openrouter.ai/
+- OmniRoute local dashboard: http://127.0.0.1:20128/dashboard
 - OpenAI (for Sora): https://platform.openai.com/
 
 ## Installation
@@ -176,11 +179,20 @@ Keep this `False` for normal usage.
 
 ### Adding New Models
 
-Add entries to `AI_MODELS` in config.py:
+Add entries to `_CURATED_MODELS` in `config.py` using **exact live OmniRoute IDs** from `omniroute models` or `GET $OMNIROUTE_BASE_URL/models`. OpenRouter-style IDs (for example `anthropic/claude-opus-4.6`) will 404.
 
 ```python
-"Model Display Name": "openrouter/model-id",
+"Claude Opus 4.6": "anthropic/claude-opus-4-6",
+"GPT 5.6 Sol (High)": "cx/gpt-5.6-sol-high",
 ```
+
+The model dropdown also has an **Endpoints** group built from live OmniRoute prefixes. Choose the route, not just the model:
+
+- `agy/…` Antigravity
+- `cx/…` or `codex/…` Codex
+- `xai/…` xAI Grok
+- `grok-cli/…` Grok CLI
+- `anthropic/…`, `gemini/…`, `openai/…`, `gh/…`, `nvidia/…`, `auto/…`
 
 ### Creating Custom Scenarios
 
@@ -207,9 +219,10 @@ SORA_SIZE=1280x720     # resolution
 
 1. API Issues:
 
-   - Check API key validity in `.env`
-   - Verify you have credits on OpenRouter
-   - Check console for error messages
+   - Confirm OmniRoute is healthy: `omniroute --output json health`
+   - Check `OMNIROUTE_BASE_URL` in `.env` (default `http://127.0.0.1:20128/v1`)
+   - Use a live OmniRoute model ID, not an OpenRouter ID
+   - Image generation still uses `OPENROUTER_API_KEY` when configured
 
 2. GUI Issues:
 
@@ -218,7 +231,7 @@ SORA_SIZE=1280x720     # resolution
 
 3. Empty Responses:
    - Some models occasionally return empty — the app will retry once automatically
-   - Check OpenRouter status if persistent
+   - Check OmniRoute logs / dashboard if persistent
 
 ## Contributing
 

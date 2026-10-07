@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+cd "$ROOT"
+mkdir -p "$ROOT/logs"
+LOG="$ROOT/logs/app-launch.log"
+exec >>"$LOG" 2>&1
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') ====="
+echo "ROOT=$ROOT"
+echo "PWD=$(pwd)"
+
+export TOGETHER_NO_BANNER=1
+export PYTHONUNBUFFERED=1
+export HOME="${HOME:-$ROOT}"
+
+# Keep the venv stub. realpath-unwrapping it drops site-packages and hangs
+# on sibling iCloud placeholders (SYNTHETIC-CONSCIOUSNESS/*.toml).
+PYTHON="$ROOT/.runtime-venv/bin/python"
+if [[ ! -x "$PYTHON" ]]; then
+  echo "runtime-venv python missing or not executable: $PYTHON"
+  PYTHON="$ROOT/.venv/bin/python"
+fi
+if [[ ! -x "$PYTHON" ]]; then
+  echo "No usable Python in .runtime-venv or .venv"
+  exit 1
+fi
+echo "PYTHON=$PYTHON"
+if ! "$PYTHON" -c "import sys; print('python', sys.version.split()[0])"; then
+  echo "Python failed a smoke import"
+  exit 1
+fi
+
+# Do not exec: LaunchServices keeps this bundle process for Dock name/icon.
+"$PYTHON" -u "$ROOT/main.py"
+echo "python exited $?"

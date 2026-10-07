@@ -199,3 +199,4 @@ outputs/.autosave_conversation.json
 # Temporary diff files
 diff_*.txt
 DIFF_*.md
+.vercel
