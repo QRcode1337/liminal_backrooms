@@ -2204,6 +2204,7 @@ class NetworkPane(QWidget):
         
         # Title with consistent tab header styling
         title = QLabel("NET.GRAPH")
+        self.header_label = title
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
@@ -2384,6 +2385,7 @@ class ImagePreviewPane(QWidget):
         
         # Title with consistent tab header styling
         self.title = QLabel("MEDIA.VIEW · IMAGES")
+        self.header_label = self.title
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
@@ -2433,11 +2435,12 @@ class ImagePreviewPane(QWidget):
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_dim']};
                 padding: 20px;
-                min-height: 200px;
+                min-height: 120px;
             }}
         """)
         self.image_label.setWordWrap(True)
         self.image_label.setScaledContents(False)
+        self.image_label.setMinimumHeight(120)
         layout.addWidget(self.image_label, 1)
         
         # Navigation controls
@@ -2634,7 +2637,7 @@ class ImagePreviewPane(QWidget):
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_dim']};
                 padding: 20px;
-                min-height: 200px;
+                min-height: 120px;
             }}
         """)
         self.info_label.setText("")
@@ -2679,6 +2682,7 @@ class VideoPreviewPane(QWidget):
         
         # Title with consistent tab header styling
         self.title = QLabel("MEDIA.VIEW · VIDEOS")
+        self.header_label = self.title
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
@@ -2732,6 +2736,7 @@ class VideoPreviewPane(QWidget):
             }}
         """)
         self.video_label.setWordWrap(True)
+        self.video_label.setMinimumHeight(120)
         layout.addWidget(self.video_label, 1)
         
         # Play button
@@ -3003,6 +3008,7 @@ class StatsWidget(QWidget):
 
         # Title
         title = QLabel("SYS.MONITOR")
+        self.header_label = title
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
@@ -3126,132 +3132,179 @@ class StatsWidget(QWidget):
             self.stats['response_times'] = self.stats['response_times'][-20:]
 
 
+class CypherWindow(QFrame):
+    """Cypher OS window: title strip over a body, square hairline frame (accent when focused)."""
+    closed = pyqtSignal()
+
+    def __init__(self, title, body, subtitle="", focused=False, closable=True, parent=None):
+        super().__init__(parent)
+        self.setObjectName("cypherWindow")
+        border = COLORS['accent_cyan'] if focused else COLORS['border']
+        self.setStyleSheet(f"""
+            QFrame#cypherWindow {{
+                background-color: {COLORS['bg_medium']};
+                border: 1px solid {border};
+            }}
+        """)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(1, 1, 1, 1)
+        outer.setSpacing(0)
+
+        self.title_strip = QWidget()
+        self.title_strip.setObjectName("cypherTitle")
+        self.title_strip.setFixedHeight(32)
+        self.title_strip.setStyleSheet(f"""
+            QWidget#cypherTitle {{
+                background-color: {COLORS['bg_titlebar']};
+                border-bottom: 1px solid {COLORS['border']};
+            }}
+        """)
+        self.strip_layout = QHBoxLayout(self.title_strip)
+        self.strip_layout.setContentsMargins(12, 0, 0, 0)
+        self.strip_layout.setSpacing(10)
+
+        if focused:
+            dot = QLabel()
+            dot.setFixedSize(8, 8)
+            dot.setStyleSheet(f"background-color: {COLORS['accent_cyan']}; border: none;")
+            self.strip_layout.addWidget(dot)
+
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet(f"""
+            color: {COLORS['text_bright']};
+            font-family: {FONTS['family_display']};
+            font-size: 12px; font-weight: bold; letter-spacing: 2px;
+            background: transparent; border: none;
+        """)
+        self.strip_layout.addWidget(self.title_label)
+
+        self.subtitle_label = QLabel(subtitle)
+        self.subtitle_label.setStyleSheet(f"""
+            color: {COLORS['text_dim']}; font-size: 10px;
+            background: transparent; border: none;
+        """)
+        self.strip_layout.addWidget(self.subtitle_label)
+        self.strip_layout.addStretch()
+
+        self._closable = closable
+        if closable:
+            close_btn = QPushButton("–")
+            close_btn.setFixedSize(32, 32)
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setToolTip(f"Hide {title} (bring it back from the taskbar)")
+            close_btn.setAccessibleName(f"Hide {title}")
+            close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {COLORS['text_dim']};
+                    border: none; border-left: 1px solid {COLORS['border']};
+                    font-size: 14px;
+                }}
+                QPushButton:hover {{ color: {COLORS['text_bright']}; background-color: {COLORS['bg_light']}; }}
+            """)
+            close_btn.clicked.connect(self._on_close_clicked)
+            self.strip_layout.addWidget(close_btn)
+
+        outer.addWidget(self.title_strip)
+        outer.addWidget(body, 1)
+
+    def add_strip_widget(self, widget):
+        """Place a control in the title strip, left of the hide button."""
+        index = self.strip_layout.count() - (1 if self._closable else 0)
+        self.strip_layout.insertWidget(index, widget)
+
+    def _on_close_clicked(self):
+        self.setVisible(False)
+        self.closed.emit()
+
+
 class RightSidebar(QWidget):
-    """Right sidebar with tabbed interface for Setup and Network Graph"""
+    """Right column of Cypher OS windows: NET.GRAPH, SYS.MONITOR and MEDIA.VIEW.
+
+    Also owns the ControlPanel instance; the main window places it in its own
+    CTRL.PANEL window on the left.
+    """
     nodeSelected = pyqtSignal(str)
     
     def __init__(self):
         super().__init__()
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(280)
         self.setup_ui()
     
     def setup_ui(self):
-        """Set up the tabbed sidebar interface"""
+        """Build the panes and stack them as windows in a resizable column"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)  # Match left panel padding
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # Create tab bar at the top (custom styled)
-        tab_container = QWidget()
-        tab_container.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS['bg_medium']};
-                border-bottom: 1px solid {COLORS['border_glow']};
-            }}
-        """)
-        tab_layout = QHBoxLayout(tab_container)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.setSpacing(0)
-        
-        # Tab buttons
-        self.setup_button = QPushButton("⚙ SETUP")
-        self.graph_button = QPushButton("🌐 GRAPH")
-        self.image_button = QPushButton("🖼 IMAGES")
-        self.video_button = QPushButton("🎬 VIDEOS")
-        self.stats_button = QPushButton("📊 STATS")
 
-        # Cyberpunk tab button styling
-        tab_style = f"""
-            QPushButton {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_dim']};
-                border: none;
-                border-bottom: 2px solid transparent;
-                padding: 12px 12px;
-                font-weight: bold;
-                font-size: 10px;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_normal']};
-            }}
-            QPushButton:checked {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['accent_cyan']};
-                border-bottom: 2px solid {COLORS['accent_cyan']};
-            }}
-        """
-        
-        self.setup_button.setStyleSheet(tab_style)
-        self.graph_button.setStyleSheet(tab_style)
-        self.image_button.setStyleSheet(tab_style)
-        self.video_button.setStyleSheet(tab_style)
-        self.stats_button.setStyleSheet(tab_style)
-
-        # Make buttons checkable for tab behavior
-        self.setup_button.setCheckable(True)
-        self.graph_button.setCheckable(True)
-        self.image_button.setCheckable(True)
-        self.video_button.setCheckable(True)
-        self.stats_button.setCheckable(True)
-        self.setup_button.setChecked(True)  # Start with setup tab active
-        
-        # Connect tab buttons
-        self.setup_button.clicked.connect(lambda: self.switch_tab(0))
-        self.graph_button.clicked.connect(lambda: self.switch_tab(1))
-        self.image_button.clicked.connect(lambda: self.switch_tab(2))
-        self.video_button.clicked.connect(lambda: self.switch_tab(3))
-        self.stats_button.clicked.connect(lambda: self.switch_tab(4))
-
-        tab_layout.addWidget(self.setup_button)
-        tab_layout.addWidget(self.graph_button)
-        tab_layout.addWidget(self.image_button)
-        tab_layout.addWidget(self.video_button)
-        tab_layout.addWidget(self.stats_button)
-
-        # Settings button
-        tab_layout.addStretch()
-        self.settings_button = QPushButton("⚙ KEYS")
-        self.settings_button.setStyleSheet(tab_style.replace(
-            "border-bottom: 2px solid transparent;",
-            "border-bottom: 2px solid transparent; border-left: 1px solid #333;"
-        ))
-        self.settings_button.setToolTip("API Keys & Provider Routing")
-        self.settings_button.clicked.connect(self._open_settings)
-        tab_layout.addWidget(self.settings_button)
-
-        layout.addWidget(tab_container)
-        
-        # Create stacked widget for tab content
         from PyQt6.QtWidgets import QStackedWidget
-        self.stack = QStackedWidget()
-        self.stack.setStyleSheet(f"""
-            QStackedWidget {{
-                background-color: {COLORS['bg_dark']};
-                border: none;
-            }}
-        """)
-        
-        # Create tab pages
+
+        # Panes (their own header labels are replaced by window title strips)
         self.control_panel = ControlPanel()
         self.network_pane = NetworkPane()
         self.image_preview_pane = ImagePreviewPane()
         self.video_preview_pane = VideoPreviewPane()
         self.stats_widget = StatsWidget()
+        for pane in (self.control_panel, self.network_pane, self.image_preview_pane,
+                     self.video_preview_pane, self.stats_widget):
+            header = getattr(pane, 'header_label', None)
+            if header is not None:
+                header.hide()
 
-        # Add pages to stack
-        self.stack.addWidget(self.control_panel)
-        self.stack.addWidget(self.network_pane)
-        self.stack.addWidget(self.image_preview_pane)
-        self.stack.addWidget(self.video_preview_pane)
-        self.stack.addWidget(self.stats_widget)
-        
-        layout.addWidget(self.stack, 1)  # Stretch to fill
+        self.graph_window = CypherWindow("NET.GRAPH", self.network_pane, "propagation map")
+        stats_scroll = QScrollArea()
+        stats_scroll.setWidgetResizable(True)
+        stats_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        stats_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        stats_scroll.setStyleSheet(f"QScrollArea {{ background: transparent; border: none; }} {get_scrollbar_style()}")
+        stats_scroll.setWidget(self.stats_widget)
+        self.stats_window = CypherWindow("SYS.MONITOR", stats_scroll, "live stats")
+
+        # MEDIA.VIEW: images / videos toggle in the title strip
+        self.media_stack = QStackedWidget()
+        self.media_stack.addWidget(self.image_preview_pane)
+        self.media_stack.addWidget(self.video_preview_pane)
+        self.media_window = CypherWindow("MEDIA.VIEW", self.media_stack)
+        toggle_style = f"""
+            QPushButton {{
+                background: transparent; color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+                font-size: 9px; font-weight: bold; letter-spacing: 1px;
+                padding: 3px 8px;
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['accent_cyan']}; color: {COLORS['bg_dark']};
+                border: 1px solid {COLORS['accent_cyan']};
+            }}
+        """
+        self.image_button = QPushButton("IMAGES")
+        self.video_button = QPushButton("VIDEOS")
+        for idx, btn in enumerate((self.image_button, self.video_button)):
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(toggle_style)
+            btn.clicked.connect(lambda _checked=False, i=idx: self.show_media(i))
+            self.media_window.add_strip_widget(btn)
+        self.image_button.setChecked(True)
+
+        self.column = QSplitter(Qt.Orientation.Vertical)
+        self.column.setHandleWidth(8)
+        self.column.setChildrenCollapsible(False)
+        self.column.setStyleSheet("QSplitter::handle { background: transparent; }")
+        self.column.addWidget(self.graph_window)
+        self.column.addWidget(self.stats_window)
+        self.column.addWidget(self.media_window)
+        self.column.setSizes([260, 200, 480])
+        layout.addWidget(self.column)
         
         # Connect network pane signal to forward it
         self.network_pane.nodeSelected.connect(self.nodeSelected)
+
+    def show_media(self, index):
+        """Switch MEDIA.VIEW between images (0) and videos (1)."""
+        self.media_stack.setCurrentIndex(index)
+        self.image_button.setChecked(index == 0)
+        self.video_button.setChecked(index == 1)
+        self.media_window.setVisible(True)
     
     def _open_settings(self):
         """Open the API Keys & Provider Routing settings dialog."""
@@ -3263,26 +3316,17 @@ class RightSidebar(QWidget):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Settings Error", str(e))
 
-    def switch_tab(self, index):
-        """Switch between tabs"""
-        self.stack.setCurrentIndex(index)
-        
-        # Update button states
-        self.setup_button.setChecked(index == 0)
-        self.graph_button.setChecked(index == 1)
-        self.image_button.setChecked(index == 2)
-        self.video_button.setChecked(index == 3)
-        self.stats_button.setChecked(index == 4)
-    
     def update_image_preview(self, image_path, ai_name="", prompt=""):
         """Update the image preview pane with a new image"""
         if hasattr(self, 'image_preview_pane'):
             self.image_preview_pane.set_image(image_path, ai_name, prompt)
+            self.show_media(0)
     
     def update_video_preview(self, video_path, ai_name="", prompt=""):
         """Update the video preview pane with a new video"""
         if hasattr(self, 'video_preview_pane'):
             self.video_preview_pane.set_video(video_path, ai_name, prompt)
+            self.show_media(1)
     
     def add_node(self, node_id, label, node_type):
         """Forward to network pane"""
@@ -3553,6 +3597,7 @@ class ControlPanel(QWidget):
         
         # Add a title with consistent tab header styling
         title = QLabel("CTRL.PANEL")
+        self.header_label = title
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(f"""
             color: {COLORS['accent_cyan']};
@@ -4326,34 +4371,60 @@ class ConversationPane(QWidget):
         """Set up the user interface for the conversation pane"""
         # Main layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)  # Reduced spacing
-        
-        # Title and info area
-        title_layout = QHBoxLayout()
-        self.title_label = QLabel("◆ CYPHER//OS  ~/backrooms")
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.default_title = "~/backrooms"
+
+        # Title strip (Cypher OS window chrome for the focused session window)
+        self.title_strip = QWidget()
+        self.title_strip.setObjectName("sessionTitle")
+        self.title_strip.setFixedHeight(32)
+        self.title_strip.setStyleSheet(f"""
+            QWidget#sessionTitle {{
+                background-color: {COLORS['bg_titlebar']};
+                border-bottom: 1px solid {COLORS['border']};
+            }}
+        """)
+        title_layout = QHBoxLayout(self.title_strip)
+        title_layout.setContentsMargins(12, 0, 12, 0)
+        title_layout.setSpacing(10)
+
+        focus_dot = QLabel()
+        focus_dot.setFixedSize(8, 8)
+        focus_dot.setStyleSheet(f"background-color: {COLORS['accent_cyan']}; border: none;")
+        title_layout.addWidget(focus_dot)
+
+        self.title_label = QLabel(self.default_title)
         self.title_label.setStyleSheet(f"""
-            color: {COLORS['accent_cyan']};
+            color: {COLORS['text_bright']};
             font-family: {FONTS['family_display']};
-            font-size: 14px;
+            font-size: 12px;
             font-weight: bold;
-            padding: 4px;
-            letter-spacing: 3px;
+            letter-spacing: 2px;
+            background: transparent;
+            border: none;
         """)
         
         self.info_label = QLabel("ai ↔ ai · group chat")
         self.info_label.setStyleSheet(f"""
             color: {COLORS['text_dim']};
             font-size: 10px;
-            padding: 2px;
             letter-spacing: 1px;
+            background: transparent;
+            border: none;
         """)
         
         title_layout.addWidget(self.title_label)
-        title_layout.addStretch()
         title_layout.addWidget(self.info_label)
+        title_layout.addStretch()
         
-        layout.addLayout(title_layout)
+        layout.addWidget(self.title_strip)
+
+        # Window body
+        body = QVBoxLayout()
+        body.setContentsMargins(12, 12, 12, 12)
+        body.setSpacing(6)
+        layout.addLayout(body, 1)
         
         # Conversation display (widget-based chat scroll area)
         # Each message is a separate widget - no setHtml() means no scroll jumping!
@@ -4522,9 +4593,9 @@ class ConversationPane(QWidget):
         self.search_overlay = SearchOverlay(self)
 
         # Add widgets to layout with adjusted stretch factors
-        layout.addWidget(self.search_overlay)
-        layout.addWidget(self.conversation_display, 1)  # Main conversation area gets most space
-        layout.addWidget(input_container, 0)  # Input area gets minimal space
+        body.addWidget(self.search_overlay)
+        body.addWidget(self.conversation_display, 1)  # Main conversation area gets most space
+        body.addWidget(input_container, 0)  # Input area gets minimal space
     
     def connect_signals(self):
         """Connect signals and slots"""
@@ -5574,7 +5645,7 @@ body {{
             self.title_label.setText(f"{branch_emoji} {branch_type.capitalize()}: {selected_text[:30]}...")
             self.info_label.setText(f"Branch conversation")
         else:
-            self.title_label.setText("◆ CYPHER//OS  ~/backrooms")
+            self.title_label.setText(self.default_title)
             # Don't override info_label here - let mode selector control it
         
         # Debug: Print conversation to console
@@ -5901,6 +5972,87 @@ class ScanlineOverlayWidget(QWidget):
         painter.drawRect(self.rect())
 
 
+class CypherMenuBar(QWidget):
+    """Cypher OS top bar: logo, system menus, link status and clock."""
+
+    MENUS = ["Session", "Agents", "Network", "Media", "Keys"]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("cypherMenuBar")
+        self.setFixedHeight(40)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            QWidget#cypherMenuBar {{
+                background-color: {COLORS['code_bg']};
+                border-bottom: 1px solid {COLORS['border']};
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(4)
+
+        logo = QLabel(
+            f"<span style='color:{COLORS['accent_cyan']}'>◆ CYPHER</span>"
+            f"<span style='color:{COLORS['text_dim']}'>//OS</span>"
+        )
+        logo.setTextFormat(Qt.TextFormat.RichText)
+        logo.setStyleSheet(f"""
+            font-family: {FONTS['family_display']};
+            font-size: 14px; font-weight: bold; letter-spacing: 3px;
+        """)
+        layout.addWidget(logo)
+        layout.addSpacing(18)
+
+        self.menu_buttons = {}
+        for name in self.MENUS:
+            btn = QPushButton(name)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {COLORS['text_normal']};
+                    border: none; padding: 10px 10px; font-size: 12px;
+                }}
+                QPushButton:hover {{ color: {COLORS['text_bright']}; background-color: {COLORS['bg_light']}; }}
+                QPushButton::menu-indicator {{ image: none; width: 0px; }}
+            """)
+            layout.addWidget(btn)
+            self.menu_buttons[name] = btn
+        layout.addStretch()
+
+        meta_style = f"color: {COLORS['text_dim']}; font-size: 11px; letter-spacing: 1px;"
+        self.link_dot = QLabel()
+        self.link_dot.setFixedSize(8, 8)
+        self.link_label = QLabel("LINK IDLE")
+        self.link_label.setStyleSheet(meta_style)
+        route_label = QLabel("OMNIROUTE")
+        route_label.setStyleSheet(meta_style)
+        self.clock_label = QLabel()
+        self.clock_label.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 12px;")
+        layout.addWidget(self.link_dot)
+        layout.addWidget(self.link_label)
+        layout.addSpacing(16)
+        layout.addWidget(route_label)
+        layout.addSpacing(16)
+        layout.addWidget(self.clock_label)
+        self.set_link_active(False)
+
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._tick)
+        self._clock_timer.start(1000)
+        self._tick()
+
+    def _tick(self):
+        self.clock_label.setText(datetime.now().strftime("%H:%M:%S"))
+
+    def set_link_active(self, active):
+        """Signal lights up while a model request is in flight."""
+        color = COLORS['accent_cyan'] if active else COLORS['text_dim']
+        self.link_dot.setStyleSheet(f"background-color: {color}; border: none;")
+        self.link_label.setText("LINK ACTIVE" if active else "LINK IDLE")
+
+
 class LiminalBackroomsApp(QMainWindow):
     """Main application window"""
     def __init__(self):
@@ -5949,47 +6101,107 @@ class LiminalBackroomsApp(QMainWindow):
         self.central_container = CentralContainer()
         self.setCentralWidget(self.central_container)
         
-        # Main layout for content
-        main_layout = QHBoxLayout(self.central_container)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(5)
-        
-        # Create horizontal splitter for left and right panes
+        # ═══ CYPHER OS SHELL: menubar / tiled windows / taskbar ═══
+        self.menu_bar = CypherMenuBar()
+        self.setMenuWidget(self.menu_bar)
+
+        main_layout = QVBoxLayout(self.central_container)
+        main_layout.setContentsMargins(12, 12, 12, 0)
+        main_layout.setSpacing(12)
+
+        # Tiled workspace: CTRL.PANEL | session | right column
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(4)  # Slim handle
-        self.splitter.setChildrenCollapsible(False)  # Prevent panes from being collapsed
-        self.splitter.setStyleSheet(f"""
-            QSplitter::handle {{
-                background-color: {COLORS['border_highlight']};
-                border: none;
-                margin: 2px 0px;
-            }}
-            QSplitter::handle:hover {{
-                background-color: {COLORS['border_glow']};
-            }}
-            QSplitter::handle:pressed {{
-                background-color: {COLORS['accent_cyan']};
-            }}
-        """)
-        main_layout.addWidget(self.splitter)
-        
-        # Create left pane (conversation) and right sidebar (tabbed: setup + network)
+        self.splitter.setHandleWidth(12)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
+        main_layout.addWidget(self.splitter, 1)
+
         self.left_pane = ConversationPane()
         self.right_sidebar = RightSidebar()
-        
+
+        # Session window: the focused window, accent frame
+        self.left_pane.default_title = f"~/backrooms/session_{self.session_timestamp}"
+        self.left_pane.title_label.setText(self.left_pane.default_title)
+        self.session_window = QFrame()
+        self.session_window.setObjectName("sessionWindow")
+        self.session_window.setStyleSheet(f"""
+            QFrame#sessionWindow {{
+                background-color: {COLORS['bg_medium']};
+                border: 1px solid {COLORS['accent_cyan']};
+            }}
+        """)
+        session_layout = QVBoxLayout(self.session_window)
+        session_layout.setContentsMargins(1, 1, 1, 1)
+        session_layout.setSpacing(0)
+        session_layout.addWidget(self.left_pane)
+
+        self.ctrl_window = CypherWindow("CTRL.PANEL", self.right_sidebar.control_panel, "operator")
+        self.ctrl_window.setMinimumWidth(300)
+
         # Set minimum widths to prevent UI from being cut off when resizing
-        self.left_pane.setMinimumWidth(780)  # Chat panel needs space for message boxes
-        self.right_sidebar.setMinimumWidth(350)  # Control panel needs space for controls
-        
-        self.splitter.addWidget(self.left_pane)
+        self.session_window.setMinimumWidth(480)
+
+        self.splitter.addWidget(self.ctrl_window)
+        self.splitter.addWidget(self.session_window)
         self.splitter.addWidget(self.right_sidebar)
-        
-        # Set initial splitter sizes (70:30 ratio - more space for conversation)
+        self.splitter.setStretchFactor(1, 1)
         total_width = 1600  # Based on default window width
-        self.splitter.setSizes([int(total_width * 0.70), int(total_width * 0.30)])
-        
+        self.splitter.setSizes([340, total_width - 340 - 380, 380])
+
+        # Taskbar replaces the status bar row (status messages are mirrored into it)
+        self.taskbar = QWidget()
+        self.taskbar.setObjectName("cypherTaskbar")
+        self.taskbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.taskbar.setFixedHeight(38)
+        self.taskbar.setStyleSheet(f"""
+            QWidget#cypherTaskbar {{
+                background-color: {COLORS['code_bg']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        self._taskbar_layout = QHBoxLayout(self.taskbar)
+        self._taskbar_layout.setContentsMargins(12, 0, 12, 0)
+        self._taskbar_layout.setSpacing(6)
+        main_layout.addWidget(self.taskbar)
+        main_layout.setContentsMargins(12, 12, 12, 0)
+
+        self._window_toggles = {}
+        toggle_style = f"""
+            QPushButton {{
+                background: transparent; color: {COLORS['text_dim']};
+                border: 1px solid transparent; padding: 4px 10px; font-size: 11px;
+            }}
+            QPushButton:hover {{ color: {COLORS['text_bright']}; border: 1px solid {COLORS['border']}; }}
+            QPushButton:checked {{ color: {COLORS['text_normal']}; border-bottom: 2px solid {COLORS['accent_cyan']}; }}
+        """
+        session_tag = QLabel("session")
+        session_tag.setStyleSheet(f"color: {COLORS['bg_dark']}; background-color: {COLORS['accent_cyan']}; font-size: 11px; font-weight: bold; padding: 4px 10px;")
+        self._taskbar_layout.addWidget(session_tag)
+        for key, window in [("ctrl.panel", self.ctrl_window),
+                            ("net.graph", self.right_sidebar.graph_window),
+                            ("sys.monitor", self.right_sidebar.stats_window),
+                            ("media.view", self.right_sidebar.media_window)]:
+            btn = QPushButton(key)
+            btn.setCheckable(True)
+            btn.setChecked(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(f"Show / hide {key}")
+            btn.setStyleSheet(toggle_style)
+            btn.toggled.connect(window.setVisible)
+            window.closed.connect(lambda b=btn: b.setChecked(False))
+            self._taskbar_layout.addWidget(btn)
+            self._window_toggles[key] = btn
+
+        self.process_label = QLabel("idle")
+        self.process_label.setStyleSheet(f"color: {COLORS['text_normal']}; font-size: 11px; padding: 0 10px; background: transparent;")
+        self.process_label.setMaximumWidth(420)
+        self.statusBar().messageChanged.connect(
+            lambda text: self.process_label.setText(text if text else "idle"))
+
         # Initialize main conversation as root node
         self.right_sidebar.add_node('main', 'Seed', 'main')
+
+        self._build_menus()
         
         # ═══ SIGNAL INDICATOR ═══
         self.signal_indicator = SignalIndicator()
@@ -6017,7 +6229,8 @@ class LiminalBackroomsApp(QMainWindow):
             }}
         """)
         self.notification_label.setMaximumWidth(500)
-        self.statusBar().addWidget(self.notification_label, 1)
+        self._taskbar_layout.addWidget(self.notification_label, 1)
+        self._taskbar_layout.addWidget(self.process_label)
         
         # ═══ ITERATION COUNTER ═══
         self.iteration_label = QLabel("")
@@ -6029,10 +6242,10 @@ class LiminalBackroomsApp(QMainWindow):
                 background-color: transparent;
             }}
         """)
-        self.statusBar().addPermanentWidget(self.iteration_label)
+        self._taskbar_layout.addWidget(self.iteration_label)
         
         # Add signal indicator to status bar
-        self.statusBar().addPermanentWidget(self.signal_indicator)
+        self._taskbar_layout.addWidget(self.signal_indicator)
 
         # ═══ SPEED CONTROLS ═══
         speed_container = QWidget()
@@ -6095,7 +6308,7 @@ class LiminalBackroomsApp(QMainWindow):
         self.speed_buttons[1].setChecked(True)
         self.speed_buttons[1].setStyleSheet(speed_btn_checked_style)
 
-        self.statusBar().addPermanentWidget(speed_container)
+        self._taskbar_layout.addWidget(speed_container)
 
         # ═══ ZOOM INDICATOR ═══
         self.zoom_label = QLabel("ZOOM:100%")
@@ -6106,7 +6319,7 @@ class LiminalBackroomsApp(QMainWindow):
             padding: 0 6px;
             background: transparent;
         """)
-        self.statusBar().addPermanentWidget(self.zoom_label)
+        self._taskbar_layout.addWidget(self.zoom_label)
 
         # ═══ CRT TOGGLE CHECKBOX ═══
         self.crt_checkbox = QCheckBox("CRT")
@@ -6130,10 +6343,59 @@ class LiminalBackroomsApp(QMainWindow):
         """)
         self.crt_checkbox.setToolTip("Toggle CRT scanline effect")
         self.crt_checkbox.toggled.connect(self.toggle_crt_effect)
-        self.statusBar().addPermanentWidget(self.crt_checkbox)
+        self._taskbar_layout.addWidget(self.crt_checkbox)
         
+        # The taskbar is the status row now; keep QStatusBar only as the message source
+        self.statusBar().hide()
+
         # Set up input callback
         self.left_pane.set_input_callback(self.handle_user_input)
+
+    def _build_menus(self):
+        """Wire the Cypher OS menubar to existing actions."""
+        from styles import get_menu_style
+        bar = self.menu_bar.menu_buttons
+        cp = self.right_sidebar.control_panel
+
+        session_menu = QMenu(self)
+        session_menu.setStyleSheet(get_menu_style())
+        session_menu.addAction("Propagate\tCtrl+Enter", self.left_pane.handle_propagate_click)
+        session_menu.addAction("Search conversation\tCtrl+F", self.left_pane.toggle_search)
+        session_menu.addSeparator()
+        session_menu.addAction("Export\tCtrl+E", self.export_conversation)
+        session_menu.addAction("View HTML", cp._open_current_html)
+        session_menu.addAction("BackroomsBench (beta)", self.run_backroomsbench_evaluation)
+        bar["Session"].setMenu(session_menu)
+
+        agents_menu = QMenu(self)
+        agents_menu.setStyleSheet(get_menu_style())
+        for i in range(1, 6):
+            agents_menu.addAction(f"AI-{i} system prompt…", lambda n=f"AI-{i}": cp._edit_agent_prompt(n))
+        agents_menu.addSeparator()
+        agents_menu.addAction("Briefing…", lambda: (self._show_window("ctrl.panel"), cp.briefing_input.setFocus()))
+        tools_action = agents_menu.addAction("Agent tools + @mentions")
+        tools_action.setCheckable(True)
+        tools_action.setChecked(cp.agent_tools_checkbox.isChecked())
+        tools_action.toggled.connect(cp.agent_tools_checkbox.setChecked)
+        cp.agent_tools_checkbox.toggled.connect(tools_action.setChecked)
+        bar["Agents"].setMenu(agents_menu)
+
+        bar["Network"].clicked.connect(lambda: self._toggle_window("net.graph"))
+        bar["Network"].setToolTip("Show / hide NET.GRAPH")
+        bar["Media"].clicked.connect(lambda: self._toggle_window("media.view"))
+        bar["Media"].setToolTip("Show / hide MEDIA.VIEW")
+        bar["Keys"].clicked.connect(self.right_sidebar._open_settings)
+        bar["Keys"].setToolTip("API keys & provider routing")
+
+    def _toggle_window(self, key):
+        btn = self._window_toggles.get(key)
+        if btn is not None:
+            btn.setChecked(not btn.isChecked())
+
+    def _show_window(self, key):
+        btn = self._window_toggles.get(key)
+        if btn is not None:
+            btn.setChecked(True)
     
     def _on_speed_changed(self):
         """Handle speed button toggle - enforce exclusive selection and update delay"""
@@ -6188,6 +6450,8 @@ class LiminalBackroomsApp(QMainWindow):
     def set_signal_active(self, active):
         """Set signal indicator to active (waiting for response)"""
         self.signal_indicator.set_active(active)
+        if hasattr(self, 'menu_bar'):
+            self.menu_bar.set_link_active(active)
     
     def update_signal_latency(self, latency_ms):
         """Update signal indicator with response latency"""
@@ -6214,6 +6478,7 @@ class LiminalBackroomsApp(QMainWindow):
         
         # Save splitter state when it moves
         self.splitter.splitterMoved.connect(self.save_splitter_state)
+        self.right_sidebar.column.splitterMoved.connect(self.save_splitter_state)
         
         # Connect mode selector to update info label
         self.right_sidebar.control_panel.mode_selector.currentTextChanged.connect(self.on_mode_changed)
@@ -6644,7 +6909,8 @@ class LiminalBackroomsApp(QMainWindow):
             # Save splitter state to file
             with open('settings/splitter_state.json', 'w') as f:
                 json.dump({
-                    'sizes': self.splitter.sizes()
+                    'sizes_v2': self.splitter.sizes(),
+                    'column_sizes': self.right_sidebar.column.sizes()
                 }, f)
         except Exception as e:
             print(f"Error saving splitter state: {e}")
@@ -6655,13 +6921,16 @@ class LiminalBackroomsApp(QMainWindow):
             if os.path.exists('settings/splitter_state.json'):
                 with open('settings/splitter_state.json', 'r') as f:
                     state = json.load(f)
-                    if 'sizes' in state:
-                        self.splitter.setSizes(state['sizes'])
+                    # 'sizes' (old 2-pane layout) is ignored on purpose
+                    if len(state.get('sizes_v2', [])) == 3:
+                        self.splitter.setSizes(state['sizes_v2'])
+                    if len(state.get('column_sizes', [])) == 3:
+                        self.right_sidebar.column.setSizes(state['column_sizes'])
         except Exception as e:
             print(f"Error restoring splitter state: {e}")
             # Fall back to default sizes
             total_width = self.width()
-            self.splitter.setSizes([int(total_width * 0.7), int(total_width * 0.3)])
+            self.splitter.setSizes([340, max(480, total_width - 760), 380])
 
     def process_branch_conversation(self, branch_id):
         """Process the branch conversation using the selected models"""
