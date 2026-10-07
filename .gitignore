@@ -200,3 +200,6 @@ outputs/.autosave_conversation.json
 diff_*.txt
 DIFF_*.md
 .vercel
+
+# macOS Finder metadata
+.DS_Store
